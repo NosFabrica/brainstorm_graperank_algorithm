@@ -2,10 +2,8 @@ package org.example.grape;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Pipeline;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -16,19 +14,17 @@ public class RedisHelper {
     private static final int CACHE_TTL_SECONDS = 30 * 60; // 30 minutes
     private static final String KEY_PREFIX = "graperank:rels:";
 
-    private final JedisPool pool;
+    private final String host;
+    private final int port;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public RedisHelper() {
-        String redisUrl = System.getenv("REDIS_URL");
-        if (redisUrl == null || redisUrl.isEmpty()) {
-            redisUrl = "redis://localhost:6379";
-        }
-        try {
-            this.pool = new JedisPool(new URI(redisUrl));
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to connect to Redis at " + redisUrl, e);
-        }
+        this.host = System.getenv("REDIS_HOST");
+        this.port = Integer.parseInt(System.getenv("REDIS_PORT"));
+    }
+
+    private Jedis connect() {
+        return new Jedis(host, port);
     }
 
     public static class CachedUserRelationships {
@@ -60,7 +56,7 @@ public class RedisHelper {
                 .map(p -> KEY_PREFIX + p)
                 .toArray(String[]::new);
 
-        try (Jedis jedis = pool.getResource()) {
+        try (Jedis jedis = connect()) {
             List<String> values = jedis.mget(keys);
             for (int i = 0; i < pubkeys.size(); i++) {
                 String json = values.get(i);
@@ -84,7 +80,7 @@ public class RedisHelper {
     public void setBulk(Map<String, CachedUserRelationships> entries) {
         if (entries.isEmpty()) return;
 
-        try (Jedis jedis = pool.getResource()) {
+        try (Jedis jedis = connect()) {
             Pipeline pipeline = jedis.pipelined();
             for (Map.Entry<String, CachedUserRelationships> entry : entries.entrySet()) {
                 try {
@@ -100,7 +96,4 @@ public class RedisHelper {
         }
     }
 
-    public void close() {
-        pool.close();
-    }
 }

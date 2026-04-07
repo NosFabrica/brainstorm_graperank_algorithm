@@ -316,8 +316,6 @@ public class GrapeRankAlgorithm {
             iteration++;
         }
 
-        redisHelper.close();
-
         Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
 
         long algoStartTime = System.currentTimeMillis();
