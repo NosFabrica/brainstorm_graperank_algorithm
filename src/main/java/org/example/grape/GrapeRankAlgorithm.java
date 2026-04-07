@@ -209,24 +209,82 @@ public class GrapeRankAlgorithm {
 
         Map<String, List<String>> reportersByUser = new HashMap<>();
 
+        RedisHelper redisHelper = new RedisHelper();
+
         int iteration = 0;
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
 
             long batchStartTime = System.currentTimeMillis();
-            List<Neo4jHelper.RelationshipInfo> outgoingRelationships = neo4jHelper.getOutgoingRelationshipsBulk(
-                    usersBatch);
 
+            // Fetch all cache entries for the batch in a single MGET round trip
+            Map<String, RedisHelper.CachedUserRelationships> cacheHits = redisHelper.getBulk(usersBatch);
 
-            List<Neo4jHelper.RelationshipInfo> incomingFollowRelationships = neo4jHelper.getIncomingFollowRelationshipsBulk(
-                    usersBatch);
+            List<String> uncachedPubkeys = new ArrayList<>();
+            for (String pubkey : usersBatch) {
+                if (!cacheHits.containsKey(pubkey)) {
+                    uncachedPubkeys.add(pubkey);
+                }
+            }
 
-            List<Neo4jHelper.RelationshipInfo> incomingReportRelationships = neo4jHelper.getIncomingReportRelationshipsBulk(
-                    usersBatch);
+            List<Neo4jHelper.RelationshipInfo> outgoingRelationships = new ArrayList<>();
+            List<Neo4jHelper.RelationshipInfo> incomingFollowRelationships = new ArrayList<>();
+            List<Neo4jHelper.RelationshipInfo> incomingReportRelationships = new ArrayList<>();
 
-            
+            // Load relationships from cache
+            for (RedisHelper.CachedUserRelationships cached : cacheHits.values()) {
+                outgoingRelationships.addAll(cached.outgoing);
+                incomingFollowRelationships.addAll(cached.incomingFollow);
+                incomingReportRelationships.addAll(cached.incomingReport);
+            }
+
+            // Fetch uncached pubkeys from Neo4j, then cache them
+            if (!uncachedPubkeys.isEmpty()) {
+                List<Neo4jHelper.RelationshipInfo> freshOutgoing = neo4jHelper.getOutgoingRelationshipsBulk(uncachedPubkeys);
+                List<Neo4jHelper.RelationshipInfo> freshIncomingFollow = neo4jHelper.getIncomingFollowRelationshipsBulk(uncachedPubkeys);
+                List<Neo4jHelper.RelationshipInfo> freshIncomingReport = neo4jHelper.getIncomingReportRelationshipsBulk(uncachedPubkeys);
+
+                outgoingRelationships.addAll(freshOutgoing);
+                incomingFollowRelationships.addAll(freshIncomingFollow);
+                incomingReportRelationships.addAll(freshIncomingReport);
+
+                // Group results by pubkey so we can cache per user
+                Map<String, List<Neo4jHelper.RelationshipInfo>> outgoingByPubkey = new HashMap<>();
+                Map<String, List<Neo4jHelper.RelationshipInfo>> incomingFollowByPubkey = new HashMap<>();
+                Map<String, List<Neo4jHelper.RelationshipInfo>> incomingReportByPubkey = new HashMap<>();
+                for (String pubkey : uncachedPubkeys) {
+                    outgoingByPubkey.put(pubkey, new ArrayList<>());
+                    incomingFollowByPubkey.put(pubkey, new ArrayList<>());
+                    incomingReportByPubkey.put(pubkey, new ArrayList<>());
+                }
+                for (Neo4jHelper.RelationshipInfo rel : freshOutgoing) {
+                    List<Neo4jHelper.RelationshipInfo> list = outgoingByPubkey.get(rel.getSource());
+                    if (list != null) list.add(rel);
+                }
+                for (Neo4jHelper.RelationshipInfo rel : freshIncomingFollow) {
+                    List<Neo4jHelper.RelationshipInfo> list = incomingFollowByPubkey.get(rel.getTarget());
+                    if (list != null) list.add(rel);
+                }
+                for (Neo4jHelper.RelationshipInfo rel : freshIncomingReport) {
+                    List<Neo4jHelper.RelationshipInfo> list = incomingReportByPubkey.get(rel.getTarget());
+                    if (list != null) list.add(rel);
+                }
+
+                // Write all new entries in a single pipelined round trip
+                Map<String, RedisHelper.CachedUserRelationships> toCache = new HashMap<>();
+                for (String pubkey : uncachedPubkeys) {
+                    toCache.put(pubkey, new RedisHelper.CachedUserRelationships(
+                            outgoingByPubkey.get(pubkey),
+                            incomingFollowByPubkey.get(pubkey),
+                            incomingReportByPubkey.get(pubkey)
+                    ));
+                }
+                redisHelper.setBulk(toCache);
+            }
+
             long batchEndTime = System.currentTimeMillis();
-            System.out.println(
-                    iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
+            System.out.println(iteration + " :: Getting relationships (cached: " + cacheHits.size()
+                    + ", fresh: " + uncachedPubkeys.size() + ") took "
+                    + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
             List<GrapeRankInput> graperankInputsOfUser = getGrapeRankInputsOfRelationships(
                     outgoingRelationships, observer);
@@ -237,8 +295,8 @@ public class GrapeRankAlgorithm {
 
             for (Neo4jHelper.RelationshipInfo rel : incomingFollowRelationships) {
 
-                String followedUser = rel.getTarget(); 
-                String follower = rel.getSource();     
+                String followedUser = rel.getTarget();
+                String follower = rel.getSource();
 
                 followersByUser
                     .computeIfAbsent(followedUser, k -> new ArrayList<>())
@@ -247,8 +305,8 @@ public class GrapeRankAlgorithm {
 
             for (Neo4jHelper.RelationshipInfo rel : incomingReportRelationships) {
 
-                String reportedUser = rel.getTarget(); 
-                String reporter = rel.getSource();     
+                String reportedUser = rel.getTarget();
+                String reporter = rel.getSource();
 
                 reportersByUser
                     .computeIfAbsent(reportedUser, k -> new ArrayList<>())
@@ -257,6 +315,8 @@ public class GrapeRankAlgorithm {
 
             iteration++;
         }
+
+        redisHelper.close();
 
         Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
 

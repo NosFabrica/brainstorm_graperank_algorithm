@@ -193,6 +193,8 @@ public class Neo4jHelper {
         private String relationship;
         private String target;
 
+        public RelationshipInfo() {}
+
         public RelationshipInfo(String source, String relationship, String target) {
             this.source = source;
             this.relationship = relationship;
@@ -203,12 +205,24 @@ public class Neo4jHelper {
             return source;
         }
 
+        public void setSource(String source) {
+            this.source = source;
+        }
+
         public String getRelationship() {
             return relationship;
         }
 
+        public void setRelationship(String relationship) {
+            this.relationship = relationship;
+        }
+
         public String getTarget() {
             return target;
+        }
+
+        public void setTarget(String target) {
+            this.target = target;
         }
 
         @Override
