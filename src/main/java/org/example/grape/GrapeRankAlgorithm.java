@@ -4,7 +4,9 @@ import java.util.Map;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class GrapeRankAlgorithm {
 
@@ -176,6 +178,7 @@ public class GrapeRankAlgorithm {
         long startTime = System.currentTimeMillis();
 
         Neo4jHelper neo4jHelper = new Neo4jHelper();
+        GrapeRankInputsCacheHelper cacheHelper = new GrapeRankInputsCacheHelper();
 
         List<String> relevantUsers = neo4jHelper.getUsersConnectedToObserver(observer, 992);
         Map<String, Double> userDistanceMap = new HashMap<>();
@@ -190,7 +193,6 @@ public class GrapeRankAlgorithm {
         hopsMap.put(2, neo4jHelper.getUsersConnectedToObserver(observer, 2));
         hopsMap.put(1, neo4jHelper.getUsersConnectedToObserver(observer, 1));
 
-
         for (int hop = 8; hop >= 1; hop--) {
             List<String> usersAtHop = hopsMap.get(hop);
             for (String user : usersAtHop) {
@@ -198,67 +200,38 @@ public class GrapeRankAlgorithm {
             }
         }
 
-
-
         int numOfIts = (int) Math.round((double) relevantUsers.size() / BATCH_SIZE);
         System.out.println("How many Neo4j iterations: " + numOfIts);
 
-        Map<String, List<GrapeRankInput>> graperankInputs = new HashMap<>();
-
+        // Always fetch incoming relationships (needed for trusted follower/reporter counts)
         Map<String, List<String>> followersByUser = new HashMap<>();
-
         Map<String, List<String>> reportersByUser = new HashMap<>();
 
         int iteration = 0;
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
-
             long batchStartTime = System.currentTimeMillis();
-            List<Neo4jHelper.RelationshipInfo> outgoingRelationships = neo4jHelper.getOutgoingRelationshipsBulk(
-                    usersBatch);
 
+            List<Neo4jHelper.RelationshipInfo> incomingFollowRelationships = neo4jHelper.getIncomingFollowRelationshipsBulk(usersBatch);
+            List<Neo4jHelper.RelationshipInfo> incomingReportRelationships = neo4jHelper.getIncomingReportRelationshipsBulk(usersBatch);
 
-            List<Neo4jHelper.RelationshipInfo> incomingFollowRelationships = neo4jHelper.getIncomingFollowRelationshipsBulk(
-                    usersBatch);
-
-            List<Neo4jHelper.RelationshipInfo> incomingReportRelationships = neo4jHelper.getIncomingReportRelationshipsBulk(
-                    usersBatch);
-
-            
             long batchEndTime = System.currentTimeMillis();
-            System.out.println(
-                    iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
-
-            List<GrapeRankInput> graperankInputsOfUser = getGrapeRankInputsOfRelationships(
-                    outgoingRelationships, observer);
-
-            for (GrapeRankInput grprIn : graperankInputsOfUser) {
-                graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
-            }
+            System.out.println(iteration + " :: Getting incoming relationships took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
             for (Neo4jHelper.RelationshipInfo rel : incomingFollowRelationships) {
-
-                String followedUser = rel.getTarget(); 
-                String follower = rel.getSource();     
-
-                followersByUser
-                    .computeIfAbsent(followedUser, k -> new ArrayList<>())
-                    .add(follower);
+                followersByUser.computeIfAbsent(rel.getTarget(), k -> new ArrayList<>()).add(rel.getSource());
             }
-
             for (Neo4jHelper.RelationshipInfo rel : incomingReportRelationships) {
-
-                String reportedUser = rel.getTarget(); 
-                String reporter = rel.getSource();     
-
-                reportersByUser
-                    .computeIfAbsent(reportedUser, k -> new ArrayList<>())
-                    .add(reporter);
+                reportersByUser.computeIfAbsent(rel.getTarget(), k -> new ArrayList<>()).add(rel.getSource());
             }
 
             iteration++;
         }
 
-        Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
+        // Fetch graperankInputs using cache when available
+        Map<String, List<GrapeRankInput>> graperankInputs = fetchGrapeRankInputsWithCache(
+                relevantUsers, observer, neo4jHelper, cacheHelper);
+
+        Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer, userDistanceMap);
 
         long algoStartTime = System.currentTimeMillis();
         GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards);
@@ -315,6 +288,108 @@ public class GrapeRankAlgorithm {
                 finalTime / 1000.0,
                 relevantUsers.size() > 1);
 
+    }
+
+    private Map<String, List<GrapeRankInput>> fetchGrapeRankInputsWithCache(
+            List<String> relevantUsers,
+            String observer,
+            Neo4jHelper neo4jHelper,
+            GrapeRankInputsCacheHelper cacheHelper) {
+
+        Set<String> relevantUsersSet = new HashSet<>(relevantUsers);
+        GrapeRankInputsCache cached = cacheHelper.getFromCache();
+
+        if (cached != null) {
+            System.out.println("Cache HIT for graperank inputs");
+            Map<String, List<GrapeRankInput>> inputs = new HashMap<>(cached.getInputs());
+
+            // Remove ratees that are not in the current relevantUsers set
+            inputs.keySet().retainAll(relevantUsersSet);
+
+            // Find raters in relevantUsers not covered by the cache
+            Set<String> missingRaters = new HashSet<>(relevantUsersSet);
+            missingRaters.removeAll(cached.getRaters());
+
+            if (!missingRaters.isEmpty()) {
+                System.out.println("Fetching " + missingRaters.size() + " missing raters from Neo4j");
+                int batchIteration = 0;
+                for (List<String> batch : chunked(new ArrayList<>(missingRaters), BATCH_SIZE)) {
+                    long batchStartTime = System.currentTimeMillis();
+                    List<Neo4jHelper.RelationshipInfo> outgoingRels = neo4jHelper.getOutgoingRelationshipsBulk(batch);
+                    long batchEndTime = System.currentTimeMillis();
+                    System.out.println(batchIteration + " :: Fetching missing outgoing relationships took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
+
+                    List<GrapeRankInput> newInputs = getGrapeRankInputsOfRelationships(outgoingRels, observer);
+                    for (GrapeRankInput input : newInputs) {
+                        inputs.computeIfAbsent(input.getRatee(), k -> new ArrayList<>()).add(input);
+                    }
+                    batchIteration++;
+                }
+            }
+
+            // Remove any ratee keys added by missing raters that are outside relevantUsers,
+            // then strip individual inputs whose rater has no scorecard (prevents NPE in algorithm)
+            inputs.keySet().retainAll(relevantUsersSet);
+            for (List<GrapeRankInput> inputList : inputs.values()) {
+                inputList.removeIf(input -> !relevantUsersSet.contains(input.getRater()));
+            }
+
+            // Fix observer-specific confidence: cached entries used generic confidence (0.03),
+            // but the current observer's own follows should use the higher value (0.5)
+            for (List<GrapeRankInput> inputList : inputs.values()) {
+                for (GrapeRankInput input : inputList) {
+                    if (input.getRater().equals(observer)
+                            && input.getRating() == Constants.DEFAULT_RATING_FOR_FOLLOW) {
+                        input.setConfidence(Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER);
+                    }
+                }
+            }
+
+            return inputs;
+
+        } else {
+            System.out.println("Cache MISS for graperank inputs, fetching all from Neo4j");
+            Map<String, List<GrapeRankInput>> inputs = new HashMap<>();
+            Set<String> allRaters = new HashSet<>();
+
+            int batchIteration = 0;
+            for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
+                long batchStartTime = System.currentTimeMillis();
+                List<Neo4jHelper.RelationshipInfo> outgoingRelationships = neo4jHelper.getOutgoingRelationshipsBulk(usersBatch);
+                long batchEndTime = System.currentTimeMillis();
+                System.out.println(batchIteration + " :: Getting outgoing relationships took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
+
+                List<GrapeRankInput> batchInputs = getGrapeRankInputsOfRelationships(outgoingRelationships, observer);
+                for (GrapeRankInput input : batchInputs) {
+                    inputs.computeIfAbsent(input.getRatee(), k -> new ArrayList<>()).add(input);
+                }
+
+                allRaters.addAll(usersBatch);
+                batchIteration++;
+            }
+
+            // Normalize observer-specific confidence before caching so that future observers
+            // get the generic value (0.03) and can apply their own correction on load
+            Map<String, List<GrapeRankInput>> inputsForCache = new HashMap<>();
+            for (Map.Entry<String, List<GrapeRankInput>> entry : inputs.entrySet()) {
+                List<GrapeRankInput> normalized = new ArrayList<>();
+                for (GrapeRankInput input : entry.getValue()) {
+                    if (input.getRater().equals(observer)
+                            && input.getRating() == Constants.DEFAULT_RATING_FOR_FOLLOW) {
+                        normalized.add(new GrapeRankInput(
+                                input.getRater(), input.getRatee(),
+                                input.getRating(), Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW));
+                    } else {
+                        normalized.add(input);
+                    }
+                }
+                inputsForCache.put(entry.getKey(), normalized);
+            }
+
+            cacheHelper.saveToCache(new GrapeRankInputsCache(inputsForCache, allRaters));
+
+            return inputs;
+        }
     }
 
 }

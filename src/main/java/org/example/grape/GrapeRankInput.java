@@ -9,6 +9,8 @@ public class GrapeRankInput {
     private double rating;
     private double confidence;
 
+    public GrapeRankInput() {}
+
     public GrapeRankInput(String rater, String ratee, double rating, double confidence) {
         this.rater = rater;
         this.ratee = ratee;
