@@ -1,4 +1,9 @@
-package org.example.grape;
+package com.nosfabrica.graperank.grape;
+
+import com.nosfabrica.graperank.db.IGraphDB;
+import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.RelationshipInfo;
+import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Map;
 import java.util.Collections;
@@ -7,6 +12,11 @@ import java.util.HashMap;
 import java.util.List;
 
 public class GrapeRankAlgorithm {
+    private final IGraphDB db;
+
+    public GrapeRankAlgorithm(IGraphDB db) {
+        this.db = db;
+    }
 
     public static GrapeRankAlgorithmResult graperankAlgorithm(
             Map<String, List<GrapeRankInput>> graperankInputs,
@@ -85,11 +95,11 @@ public class GrapeRankAlgorithm {
     }
 
     public List<GrapeRankInput> getGrapeRankInputsOfRelationships(
-            List<Neo4jHelper.RelationshipInfo> outgoingRelationships,
+            List<RelationshipInfo> outgoingRelationships,
             String observer) {
         List<GrapeRankInput> graperankInputs = new ArrayList<>();
 
-        for (Neo4jHelper.RelationshipInfo outgoingRelationshipObj : outgoingRelationships) {
+        for (RelationshipInfo outgoingRelationshipObj : outgoingRelationships) {
             String outgoingRelationship = outgoingRelationshipObj.getRelationship();
             String outgoingRelationshipTarget = outgoingRelationshipObj.getTarget();
             String outgoingRelationshipSource = outgoingRelationshipObj.getSource();
@@ -175,20 +185,18 @@ public class GrapeRankAlgorithm {
     public GrapeRankResult graperankAllSteps(String observer) {
         long startTime = System.currentTimeMillis();
 
-        Neo4jHelper neo4jHelper = new Neo4jHelper();
-
-        List<String> relevantUsers = neo4jHelper.getUsersConnectedToObserver(observer, 992);
+        List<String> relevantUsers = db.getUsersConnectedToObserver(observer, 992);
         Map<String, Double> userDistanceMap = new HashMap<>();
 
         Map<Integer, List<String>> hopsMap = new HashMap<>();
-        hopsMap.put(8, neo4jHelper.getUsersConnectedToObserver(observer, 8));
-        hopsMap.put(7, neo4jHelper.getUsersConnectedToObserver(observer, 7));
-        hopsMap.put(6, neo4jHelper.getUsersConnectedToObserver(observer, 6));
-        hopsMap.put(5, neo4jHelper.getUsersConnectedToObserver(observer, 5));
-        hopsMap.put(4, neo4jHelper.getUsersConnectedToObserver(observer, 4));
-        hopsMap.put(3, neo4jHelper.getUsersConnectedToObserver(observer, 3));
-        hopsMap.put(2, neo4jHelper.getUsersConnectedToObserver(observer, 2));
-        hopsMap.put(1, neo4jHelper.getUsersConnectedToObserver(observer, 1));
+        hopsMap.put(8, db.getUsersConnectedToObserver(observer, 8));
+        hopsMap.put(7, db.getUsersConnectedToObserver(observer, 7));
+        hopsMap.put(6, db.getUsersConnectedToObserver(observer, 6));
+        hopsMap.put(5, db.getUsersConnectedToObserver(observer, 5));
+        hopsMap.put(4, db.getUsersConnectedToObserver(observer, 4));
+        hopsMap.put(3, db.getUsersConnectedToObserver(observer, 3));
+        hopsMap.put(2, db.getUsersConnectedToObserver(observer, 2));
+        hopsMap.put(1, db.getUsersConnectedToObserver(observer, 1));
 
 
         for (int hop = 8; hop >= 1; hop--) {
@@ -213,14 +221,14 @@ public class GrapeRankAlgorithm {
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
 
             long batchStartTime = System.currentTimeMillis();
-            List<Neo4jHelper.RelationshipInfo> outgoingRelationships = neo4jHelper.getOutgoingRelationshipsBulk(
+            List<RelationshipInfo> outgoingRelationships = db.getOutgoingRelationshipsBulk(
                     usersBatch);
 
 
-            List<Neo4jHelper.RelationshipInfo> incomingFollowRelationships = neo4jHelper.getIncomingFollowRelationshipsBulk(
+            List<RelationshipInfo> incomingFollowRelationships = db.getIncomingFollowRelationshipsBulk(
                     usersBatch);
 
-            List<Neo4jHelper.RelationshipInfo> incomingReportRelationships = neo4jHelper.getIncomingReportRelationshipsBulk(
+            List<RelationshipInfo> incomingReportRelationships = db.getIncomingReportRelationshipsBulk(
                     usersBatch);
 
             
@@ -235,7 +243,7 @@ public class GrapeRankAlgorithm {
                 graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
             }
 
-            for (Neo4jHelper.RelationshipInfo rel : incomingFollowRelationships) {
+            for (RelationshipInfo rel : incomingFollowRelationships) {
 
                 String followedUser = rel.getTarget(); 
                 String follower = rel.getSource();     
@@ -245,7 +253,7 @@ public class GrapeRankAlgorithm {
                     .add(follower);
             }
 
-            for (Neo4jHelper.RelationshipInfo rel : incomingReportRelationships) {
+            for (RelationshipInfo rel : incomingReportRelationships) {
 
                 String reportedUser = rel.getTarget(); 
                 String reporter = rel.getSource();     

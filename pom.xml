@@ -65,7 +65,7 @@
 
                         <transformers>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                            <mainClass>org.example.Main</mainClass>
+                            <mainClass>com.nosfabrica.graperank.stream.Main</mainClass>
                         </transformer>
                         </transformers>
                     </configuration>

@@ -1,4 +1,4 @@
-package org.example.grape;
+package com.nosfabrica.graperank.grape;
 
 public class Constants {
 

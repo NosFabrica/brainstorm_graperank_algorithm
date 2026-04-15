@@ -1,7 +1,8 @@
-package org.example;
+package com.nosfabrica.graperank.stream;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nosfabrica.graperank.db.Neo4jHelper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import java.util.Map;
@@ -10,9 +11,8 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.example.grape.GrapeRankAlgorithm;
-import org.example.grape.GrapeRankResult;
-import org.example.grape.MessageQueueReturnValue;
+import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
+import com.nosfabrica.graperank.grape.GrapeRankResult;
 
 public class Main {
 
@@ -24,6 +24,10 @@ public class Main {
 
     private static final String REDIS_HOST = System.getenv("REDIS_HOST");
     private static final int REDIS_PORT = Integer.parseInt(System.getenv("REDIS_PORT"));
+
+    private static final String NEO4J_URL = System.getenv("NEO4J_URL");
+    private static final String NEO4J_USERNAME = System.getenv("NEO4J_USERNAME");
+    private static final String NEO4J_PASSWORD = System.getenv("NEO4J_PASSWORD");
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -91,7 +95,7 @@ public class Main {
 
             processJobStarted(privateId);
 
-            GrapeRankAlgorithm helper = new GrapeRankAlgorithm();
+            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD));
             GrapeRankResult result = helper.graperankAllSteps(observer);
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);

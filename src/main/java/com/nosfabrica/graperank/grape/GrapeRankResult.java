@@ -1,6 +1,7 @@
-package org.example.grape;
+package com.nosfabrica.graperank.grape;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Map;
 

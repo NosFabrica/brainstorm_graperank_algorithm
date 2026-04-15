@@ -1,4 +1,4 @@
-package org.example.grape;
+package com.nosfabrica.graperank.rank;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class ScoreCard {

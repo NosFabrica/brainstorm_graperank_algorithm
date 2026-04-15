@@ -1,4 +1,6 @@
-package org.example.grape;
+package com.nosfabrica.graperank.grape;
+
+import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Map;
 
