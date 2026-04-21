@@ -8,8 +8,6 @@ import redis.clients.jedis.exceptions.JedisConnectionException;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
@@ -30,9 +28,19 @@ public class Main {
     private static final String NEO4J_PASSWORD = System.getenv("NEO4J_PASSWORD");
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final ExecutorService executor = Executors.newFixedThreadPool(4);
+
+    // Shared Neo4j driver for the lifetime of the process.
+    // Creating a new driver per message leaked connection pools, Netty event loops,
+    // and direct ByteBuffers, which caused OOM over time.
+    private static final Neo4jHelper neo4jHelper =
+            new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD);
 
     public static void main(String[] args) {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("Shutting down, closing Neo4j driver...");
+            neo4jHelper.close();
+        }));
+
         while (true) { // reconnect loop
             try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
                 System.out.println("Connected to Redis. Waiting for messages on '" + QUEUE_NAME + "'...");
@@ -95,7 +103,7 @@ public class Main {
 
             processJobStarted(privateId);
 
-            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD));
+            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(neo4jHelper);
             GrapeRankResult result = helper.graperankAllSteps(observer);
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);

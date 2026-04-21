@@ -23,4 +23,5 @@ WORKDIR /app
 COPY --from=builder /app/target/graperank3-1.0-SNAPSHOT.jar app.jar
 
 # Run the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Use shell form to allow JAVA_OPTS environment variable expansion
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
