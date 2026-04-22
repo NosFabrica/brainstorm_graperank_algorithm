@@ -182,40 +182,24 @@ public class GrapeRankAlgorithm {
         return chunks;
     }
 
-    // Max hops for observer reachability. 8 is far beyond the effective diameter
-    // of a real social graph (~6 hops reaches essentially everyone). The previous
-    // value of 992 caused Neo4j to materialize pathological amounts of path data.
-    private static final int MAX_HOPS = 8;
-
     public GrapeRankResult graperankAllSteps(String observer) {
         long startTime = System.currentTimeMillis();
 
         Map<String, Double> userDistanceMap = new HashMap<>();
 
-        // Query once per hop level (1..MAX_HOPS). Each query returns a superset
-        // of the previous, so we walk from MAX_HOPS down to 1 and overwrite the
-        // distance with the smaller value. This is the same behavior as before,
-        // just bounded at a sane hop count.
         Map<Integer, List<String>> hopsMap = new HashMap<>();
-        for (int hop = MAX_HOPS; hop >= 1; hop--) {
+        for (int hop = 992; hop >= 1; hop--) {
             hopsMap.put(hop, db.getUsersConnectedToObserver(observer, hop));
         }
 
-        // Build the full set of relevant users (all users reachable within MAX_HOPS).
-        // We need to collect users from ALL hop levels (1 through MAX_HOPS), not just
-        // users at exactly MAX_HOPS distance.
-        List<String> relevantUsers = new ArrayList<>();
-        for (int hop = 1; hop <= MAX_HOPS; hop++) {
+        for (int hop = 992; hop >= 1; hop--) {
             List<String> usersAtHop = hopsMap.get(hop);
             for (String user : usersAtHop) {
-                // Only add each user once (users appear in multiple hop lists if
-                // reachable via multiple paths). We want the SHORTEST hop distance.
-                if (!userDistanceMap.containsKey(user)) {
-                    relevantUsers.add(user);
-                    userDistanceMap.put(user, (double) hop);
-                }
+                userDistanceMap.put(user, (double) hop);
             }
         }
+
+        List<String> relevantUsers = db.getUsersConnectedToObserver(observer, 992);
 
 
 
@@ -327,12 +311,16 @@ public class GrapeRankAlgorithm {
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
+        boolean success = relevantUsers.size() > 1;
+        System.out.println("RELEVANT USERS SIZE: " + relevantUsers.size());
+        System.out.println("SUCCESS FLAG: " + success);
+
         return new GrapeRankResult(
 
                 algorithmResult.getScorecards(),
                 algorithmResult.getRounds(),
                 finalTime / 1000.0,
-                relevantUsers.size() > 1);
+                success);
 
     }
 
