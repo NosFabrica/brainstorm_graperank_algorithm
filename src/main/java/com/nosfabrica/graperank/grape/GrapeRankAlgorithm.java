@@ -20,7 +20,8 @@ public class GrapeRankAlgorithm {
 
     public static GrapeRankAlgorithmResult graperankAlgorithm(
             Map<String, List<GrapeRankInput>> graperankInputs,
-            Map<String, ScoreCard> graperankScorecards) {
+            Map<String, ScoreCard> graperankScorecards,
+            GrapeRankParams params) {
 
         int rounds = 0;
         boolean shouldBreak;
@@ -45,7 +46,7 @@ public class GrapeRankAlgorithm {
                     double infOfRater = graperankScorecards.get(relevantDataPoint.getRater()).getInfluence();
                     double weight = relevantDataPoint.getConfidence()
                             * infOfRater
-                            * Constants.GLOBAL_ATTENUATION_FACTOR;
+                            * params.attenuationFactor();
 
                     double wxr = weight * relevantDataPoint.getRating();
 
@@ -58,7 +59,7 @@ public class GrapeRankAlgorithm {
                 scorecard.setInput(sumOfWeights);
 
                 // Convert input to confidence (you need to define the logic for this)
-                scorecard.setConfidence(convertInputToConfidence(scorecard.getInput(), Constants.GLOBAL_RIGOR));
+                scorecard.setConfidence(convertInputToConfidence(scorecard.getInput(), params.rigor()));
 
                 double computedInfluence = Math.max(scorecard.getAverageScore() * scorecard.getConfidence(), 0);
                 double deltaInfluence = Math.abs(computedInfluence - scorecard.getInfluence());
@@ -79,7 +80,7 @@ public class GrapeRankAlgorithm {
         }
 
         for (ScoreCard scorecard : graperankScorecards.values()) {
-            scorecard.setVerified(scorecard.getInfluence() >= Constants.DEFAULT_CUTOFF_OF_VALID_USER);
+            scorecard.setVerified(scorecard.getInfluence() >= params.verifiedFollowersInfluenceCutoff());
         }
 
         return new GrapeRankAlgorithmResult(graperankScorecards, rounds);
@@ -96,7 +97,8 @@ public class GrapeRankAlgorithm {
 
     public List<GrapeRankInput> getGrapeRankInputsOfRelationships(
             List<RelationshipInfo> outgoingRelationships,
-            String observer) {
+            String observer,
+            GrapeRankParams params) {
         List<GrapeRankInput> graperankInputs = new ArrayList<>();
 
         for (RelationshipInfo outgoingRelationshipObj : outgoingRelationships) {
@@ -108,13 +110,13 @@ public class GrapeRankAlgorithm {
 
             switch (outgoingRelationship) {
                 case "FOLLOWS":
-                    rating = Constants.DEFAULT_RATING_FOR_FOLLOW;
+                    rating = params.followRating();
                     break;
                 case "MUTES":
-                    rating = Constants.DEFAULT_RATING_FOR_MUTE;
+                    rating = params.muteRating();
                     break;
                 case "REPORTS":
-                    rating = Constants.DEFAULT_RATING_FOR_REPORT;
+                    rating = params.reportRating();
                     break;
                 default:
                     throw new IllegalArgumentException("Unknown relationship type: " + outgoingRelationship);
@@ -125,16 +127,16 @@ public class GrapeRankAlgorithm {
             switch (outgoingRelationship) {
                 case "FOLLOWS":
                     if (outgoingRelationshipSource.equals(observer)) {
-                        confidence = Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER;
+                        confidence = params.followConfidenceOfObserver();
                     } else {
-                        confidence = Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW;
+                        confidence = params.followConfidence();
                     }
                     break;
                 case "MUTES":
-                    confidence = Constants.DEFAULT_CONFIDENCE_FOR_MUTE;
+                    confidence = params.muteConfidence();
                     break;
                 case "REPORTS":
-                    confidence = Constants.DEFAULT_CONFIDENCE_FOR_REPORT;
+                    confidence = params.reportConfidence();
                     break;
                 default:
                     throw new IllegalArgumentException("Unknown relationship type: " + outgoingRelationship);
@@ -183,6 +185,10 @@ public class GrapeRankAlgorithm {
     }
 
     public GrapeRankResult graperankAllSteps(String observer) {
+        return graperankAllSteps(observer, GrapeRankPresets.DEFAULT);
+    }
+
+    public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
         long startTime = System.currentTimeMillis();
 
         List<String> relevantUsers = db.getUsersConnectedToObserver(observer, 992);
@@ -237,7 +243,7 @@ public class GrapeRankAlgorithm {
                     iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
             List<GrapeRankInput> graperankInputsOfUser = getGrapeRankInputsOfRelationships(
-                    outgoingRelationships, observer);
+                    outgoingRelationships, observer, params);
 
             for (GrapeRankInput grprIn : graperankInputsOfUser) {
                 graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
@@ -269,7 +275,7 @@ public class GrapeRankAlgorithm {
         Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
 
         long algoStartTime = System.currentTimeMillis();
-        GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards);
+        GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards, params);
         long algoEndTime = System.currentTimeMillis();
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 
@@ -288,7 +294,7 @@ public class GrapeRankAlgorithm {
             long trustedFollowersCount = followers.stream()
                 .filter(followerPubkey -> {
                     ScoreCard followerScoreCard = finalScorecards.get(followerPubkey);
-                    return followerScoreCard != null && followerScoreCard.getInfluence() > Constants.DEFAULT_CUTOFF_OF_VALID_USER;
+                    return followerScoreCard != null && followerScoreCard.getInfluence() > params.verifiedFollowersInfluenceCutoff();
                 })
                 .count();
 
@@ -303,7 +309,7 @@ public class GrapeRankAlgorithm {
             long trustedReportersCount = reporters.stream()
                 .filter(reporterPubkey -> {
                     ScoreCard reporterScoreCard = finalScorecards.get(reporterPubkey);
-                    return reporterScoreCard != null && reporterScoreCard.getInfluence() > Constants.DEFAULT_CUTOFF_OF_TRUSTED_REPORTER;
+                    return reporterScoreCard != null && reporterScoreCard.getInfluence() > params.verifiedReportersInfluenceCutoff();
                 })
                 .count();
 
