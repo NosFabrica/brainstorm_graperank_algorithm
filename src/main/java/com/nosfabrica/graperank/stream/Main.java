@@ -3,6 +3,7 @@ package com.nosfabrica.graperank.stream;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import java.util.Map;
@@ -95,7 +96,9 @@ public class Main {
 
             processJobStarted(privateId);
 
-            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD));
+            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
+                    new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
+                    new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
             GrapeRankResult result = helper.graperankAllSteps(observer);
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
