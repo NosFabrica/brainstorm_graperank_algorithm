@@ -12,6 +12,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
+import com.nosfabrica.graperank.grape.GrapeRankParams;
+import com.nosfabrica.graperank.grape.GrapeRankPresets;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
 
 public class Main {
@@ -66,6 +68,39 @@ public class Main {
         }
     }
 
+    private static GrapeRankParams resolveParams(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return GrapeRankPresets.DEFAULT;
+        }
+        try {
+            JsonNode templateNode = node.get("template");
+            String raw = templateNode != null ? templateNode.asText() : null;
+            GrapeRankPresets.Template template = GrapeRankPresets.parseTemplate(raw);
+
+            if (template != GrapeRankPresets.Template.CUSTOM) {
+                return GrapeRankPresets.forTemplate(template);
+            }
+
+            return new GrapeRankParams(
+                    node.get("rigor").asDouble(),
+                    node.get("attenuation_factor").asDouble(),
+                    node.get("follow_rating").asDouble(),
+                    node.get("follow_confidence").asDouble(),
+                    node.get("mute_rating").asDouble(),
+                    node.get("mute_confidence").asDouble(),
+                    node.get("report_rating").asDouble(),
+                    node.get("report_confidence").asDouble(),
+                    node.get("follow_confidence_of_observer").asDouble(),
+                    node.get("verified_followers_influence_cutoff").asDouble(),
+                    node.get("verified_reporters_influence_cutoff").asDouble(),
+                    node.get("verified_muters_influence_cutoff").asDouble()
+            );
+        } catch (Exception e) {
+            System.err.println("Failed to parse graperank_params, falling back to DEFAULT: " + e.getMessage());
+            return GrapeRankPresets.DEFAULT;
+        }
+    }
+
     private static void processJobStarted(int privateId) {
         try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
             System.out.println("Setting job as ongoing: " + privateId);
@@ -91,12 +126,14 @@ public class Main {
             int privateId = parsed.get("private_id").asInt();
             String observer = parsed.get("parameters").asText();
 
+            GrapeRankParams params = resolveParams(parsed.get("graperank_params"));
+
             System.out.println("Processing message: " + privateId);
 
             processJobStarted(privateId);
 
             GrapeRankAlgorithm helper = new GrapeRankAlgorithm(new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD));
-            GrapeRankResult result = helper.graperankAllSteps(observer);
+            GrapeRankResult result = helper.graperankAllSteps(observer, params);
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
             String finalJson = mapper.writeValueAsString(finalMessage);
