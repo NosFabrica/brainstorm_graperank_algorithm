@@ -19,4 +19,21 @@ public class Constants {
     public static final double DEFAULT_CUTOFF_OF_VALID_USER = 0.02;
 
     public static final double DEFAULT_CUTOFF_OF_TRUSTED_REPORTER = 0.1;
+
+    public static final double DEFAULT_CUTOFF_OF_VERIFIED_MUTER = 0.01;
+
+    public static final GrapeRankParams DEFAULT_PARAMS = new GrapeRankParams(
+            GLOBAL_RIGOR,
+            GLOBAL_ATTENUATION_FACTOR,
+            DEFAULT_RATING_FOR_FOLLOW,
+            DEFAULT_CONFIDENCE_FOR_FOLLOW,
+            DEFAULT_RATING_FOR_MUTE,
+            DEFAULT_CONFIDENCE_FOR_MUTE,
+            DEFAULT_RATING_FOR_REPORT,
+            DEFAULT_CONFIDENCE_FOR_REPORT,
+            DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER,
+            DEFAULT_CUTOFF_OF_VALID_USER,
+            DEFAULT_CUTOFF_OF_TRUSTED_REPORTER,
+            DEFAULT_CUTOFF_OF_VERIFIED_MUTER
+    );
 }

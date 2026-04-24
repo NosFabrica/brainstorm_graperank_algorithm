@@ -1,5 +1,6 @@
 package com.nosfabrica.graperank.stream;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nosfabrica.graperank.db.Neo4jHelper;
@@ -13,7 +14,6 @@ import java.util.concurrent.Executors;
 
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
 import com.nosfabrica.graperank.grape.GrapeRankParams;
-import com.nosfabrica.graperank.grape.GrapeRankPresets;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
 
 public class Main {
@@ -31,7 +31,9 @@ public class Main {
     private static final String NEO4J_USERNAME = System.getenv("NEO4J_USERNAME");
     private static final String NEO4J_PASSWORD = System.getenv("NEO4J_PASSWORD");
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
     private static final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     public static void main(String[] args) {
@@ -68,36 +70,21 @@ public class Main {
         }
     }
 
-    private static GrapeRankParams resolveParams(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return GrapeRankPresets.DEFAULT;
+    private static GrapeRankParams resolveParams(JsonNode paramsNode) throws Exception {
+        if (paramsNode == null || paramsNode.isNull()) {
+            throw new IllegalArgumentException("graperank_params missing from payload");
         }
+        return mapper.treeToValue(paramsNode, GrapeRankParams.class);
+    }
+
+    private static void pushFailureResult(Jedis redis, int privateId, String reason) {
         try {
-            JsonNode templateNode = node.get("template");
-            String raw = templateNode != null ? templateNode.asText() : null;
-            GrapeRankPresets.Template template = GrapeRankPresets.parseTemplate(raw);
-
-            if (template != GrapeRankPresets.Template.CUSTOM) {
-                return GrapeRankPresets.forTemplate(template);
-            }
-
-            return new GrapeRankParams(
-                    node.get("rigor").asDouble(),
-                    node.get("attenuation_factor").asDouble(),
-                    node.get("follow_rating").asDouble(),
-                    node.get("follow_confidence").asDouble(),
-                    node.get("mute_rating").asDouble(),
-                    node.get("mute_confidence").asDouble(),
-                    node.get("report_rating").asDouble(),
-                    node.get("report_confidence").asDouble(),
-                    node.get("follow_confidence_of_observer").asDouble(),
-                    node.get("verified_followers_influence_cutoff").asDouble(),
-                    node.get("verified_reporters_influence_cutoff").asDouble(),
-                    node.get("verified_muters_influence_cutoff").asDouble()
-            );
+            GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false);
+            MessageQueueReturnValue msg = new MessageQueueReturnValue(failure, privateId);
+            redis.rpush(RESULTS_QUEUE_NAME, mapper.writeValueAsString(msg));
+            System.err.println("Pushed failure result for privateId " + privateId + ": " + reason);
         } catch (Exception e) {
-            System.err.println("Failed to parse graperank_params, falling back to DEFAULT: " + e.getMessage());
-            return GrapeRankPresets.DEFAULT;
+            System.err.println("Failed to push failure result for privateId " + privateId + ": " + e.getMessage());
         }
     }
 
@@ -126,7 +113,14 @@ public class Main {
             int privateId = parsed.get("private_id").asInt();
             String observer = parsed.get("parameters").asText();
 
-            GrapeRankParams params = resolveParams(parsed.get("graperank_params"));
+            GrapeRankParams params;
+            try {
+                params = resolveParams(parsed.get("graperank_params"));
+            } catch (Exception e) {
+                System.err.println("Malformed graperank_params for privateId " + privateId + ", marking FAILED: " + e.getMessage());
+                pushFailureResult(redis, privateId, e.getMessage());
+                return;
+            }
 
             System.out.println("Processing message: " + privateId);
 
