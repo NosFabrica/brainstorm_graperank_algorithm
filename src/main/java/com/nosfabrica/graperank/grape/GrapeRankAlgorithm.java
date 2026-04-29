@@ -196,7 +196,8 @@ public class GrapeRankAlgorithm {
     public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
         long startTime = System.currentTimeMillis();
 
-        List<String> relevantUsers = db.getUsersConnectedToObserver(observer, 992);
+        Map<String, Double> previousInfluence = db.getUsersConnectedToObserverWithPreviousInfluence(observer);
+        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
         Map<String, Double> userDistanceMap = new HashMap<>();
 
         Map<Integer, List<String>> hopsMap = new HashMap<>();
@@ -339,17 +340,40 @@ public class GrapeRankAlgorithm {
             scoreCard.setTrustedReporters((double) trustedReportersCount);
         }
 
+        List<String> changedScorePubkeys = new ArrayList<>();
+        List<String> droppedBelowCutoffPubkeys = new ArrayList<>();
+        double cutoff = 0.02;
 
+        for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
+            String pubkey = entry.getKey();
+            double newScore = entry.getValue().getInfluence();
+            double newRounded = Math.round(newScore * 100.0) / 100.0;
+
+            Double prev = previousInfluence.get(pubkey);
+            boolean hasPrev = prev != null;
+            double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
+
+            if (hasPrev && prevRounded >= cutoff && newScore < cutoff) {
+                droppedBelowCutoffPubkeys.add(pubkey);
+            } else if (hasPrev) {
+                if (Double.compare(newRounded, prevRounded) != 0) {
+                    changedScorePubkeys.add(pubkey);
+                }
+            } else if (newScore > cutoff) {
+                changedScorePubkeys.add(pubkey);
+            }
+        }
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
         return new GrapeRankResult(
-
                 algorithmResult.getScorecards(),
                 algorithmResult.getRounds(),
                 finalTime / 1000.0,
-                relevantUsers.size() > 1);
+                relevantUsers.size() > 1,
+                changedScorePubkeys,
+                droppedBelowCutoffPubkeys);
 
     }
 
