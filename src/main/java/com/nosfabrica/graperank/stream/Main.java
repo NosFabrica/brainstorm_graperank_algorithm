@@ -1,5 +1,6 @@
 package com.nosfabrica.graperank.stream;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nosfabrica.graperank.db.Neo4jHelper;
@@ -13,6 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
+import com.nosfabrica.graperank.grape.GrapeRankParams;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
 
 public class Main {
@@ -30,7 +32,9 @@ public class Main {
     private static final String NEO4J_USERNAME = System.getenv("NEO4J_USERNAME");
     private static final String NEO4J_PASSWORD = System.getenv("NEO4J_PASSWORD");
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
     private static final ExecutorService executor = Executors.newFixedThreadPool(4);
 
     public static void main(String[] args) {
@@ -67,6 +71,24 @@ public class Main {
         }
     }
 
+    private static GrapeRankParams resolveParams(JsonNode paramsNode) throws Exception {
+        if (paramsNode == null || paramsNode.isNull()) {
+            throw new IllegalArgumentException("graperank_params missing from payload");
+        }
+        return mapper.treeToValue(paramsNode, GrapeRankParams.class);
+    }
+
+    private static void pushFailureResult(Jedis redis, int privateId, String reason) {
+        try {
+            GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false);
+            MessageQueueReturnValue msg = new MessageQueueReturnValue(failure, privateId);
+            redis.rpush(RESULTS_QUEUE_NAME, mapper.writeValueAsString(msg));
+            System.err.println("Pushed failure result for privateId " + privateId + ": " + reason);
+        } catch (Exception e) {
+            System.err.println("Failed to push failure result for privateId " + privateId + ": " + e.getMessage());
+        }
+    }
+
     private static void processJobStarted(int privateId) {
         try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
             System.out.println("Setting job as ongoing: " + privateId);
@@ -92,14 +114,25 @@ public class Main {
             int privateId = parsed.get("private_id").asInt();
             String observer = parsed.get("parameters").asText();
 
+            GrapeRankParams params;
+            try {
+                params = resolveParams(parsed.get("graperank_params"));
+            } catch (Exception e) {
+                System.err.println("Malformed graperank_params for privateId " + privateId + ", marking FAILED: " + e.getMessage());
+                pushFailureResult(redis, privateId, e.getMessage());
+                return;
+            }
+
             System.out.println("Processing message: " + privateId);
 
             processJobStarted(privateId);
 
+
             GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
                     new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
                     new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
-            GrapeRankResult result = helper.graperankAllSteps(observer);
+            GrapeRankResult result = helper.graperankAllSteps(observer,params);
+
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
             String finalJson = mapper.writeValueAsString(finalMessage);
