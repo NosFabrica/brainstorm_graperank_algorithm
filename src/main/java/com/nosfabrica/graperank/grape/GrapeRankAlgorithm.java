@@ -185,7 +185,7 @@ public class GrapeRankAlgorithm {
     }
 
     public GrapeRankResult graperankAllSteps(String observer) {
-        return graperankAllSteps(observer, GrapeRankPresets.DEFAULT);
+        return graperankAllSteps(observer, Constants.DEFAULT_PARAMS);
     }
 
     public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
