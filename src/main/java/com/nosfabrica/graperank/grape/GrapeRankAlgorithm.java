@@ -359,7 +359,7 @@ public class GrapeRankAlgorithm {
                 if (Double.compare(newRounded, prevRounded) != 0) {
                     changedScorePubkeys.add(pubkey);
                 }
-            } else if (newScore > cutoff) {
+            } else if (newScore >= cutoff) {
                 changedScorePubkeys.add(pubkey);
             }
         }
