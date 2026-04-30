@@ -11,12 +11,18 @@ public class GrapeRankResult {
     @JsonProperty("duration_seconds")
     private double duration_seconds;
     private boolean success = false;
+    private GrapeRankError error;
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success) {
+        this(scorecards, rounds, durationSeconds, success, null);
+    }
+
+    public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success, GrapeRankError error) {
         this.scorecards = scorecards;
         this.rounds = rounds;
         this.duration_seconds = durationSeconds;
         this.success = success;
+        this.error = error;
     }
 
     public Map<String, ScoreCard> getScorecards() {
@@ -49,5 +55,13 @@ public class GrapeRankResult {
 
     public void setSuccess(boolean success) {
         this.success = success;
+    }
+
+    public GrapeRankError getError() {
+        return error;
+    }
+
+    public void setError(GrapeRankError error) {
+        this.error = error;
     }
 }

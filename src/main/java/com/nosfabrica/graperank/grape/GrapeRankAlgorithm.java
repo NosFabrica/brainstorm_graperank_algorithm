@@ -3,6 +3,8 @@ package com.nosfabrica.graperank.grape;
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.Neo4jHelper;
 import com.nosfabrica.graperank.db.RelationshipInfo;
+import com.nosfabrica.graperank.exceptions.ErrorCode;
+import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
 import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Map;
@@ -119,7 +121,7 @@ public class GrapeRankAlgorithm {
                     rating = params.reportRating();
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown relationship type: " + outgoingRelationship);
+                    throw new UnknownRelationshipException(outgoingRelationship);
             }
 
             double confidence = 0;
@@ -139,7 +141,7 @@ public class GrapeRankAlgorithm {
                     confidence = params.reportConfidence();
                     break;
                 default:
-                    throw new IllegalArgumentException("Unknown relationship type: " + outgoingRelationship);
+                    throw new UnknownRelationshipException(outgoingRelationship);
             }
 
             GrapeRankInput newInput = new GrapeRankInput(outgoingRelationshipSource, outgoingRelationshipTarget, rating,
@@ -322,12 +324,17 @@ public class GrapeRankAlgorithm {
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
-        return new GrapeRankResult(
+        boolean success = relevantUsers.size() > 1;
+        GrapeRankError error = success
+                ? null
+                : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
 
+        return new GrapeRankResult(
                 algorithmResult.getScorecards(),
                 algorithmResult.getRounds(),
                 finalTime / 1000.0,
-                relevantUsers.size() > 1);
+                success,
+                error);
 
     }
 
