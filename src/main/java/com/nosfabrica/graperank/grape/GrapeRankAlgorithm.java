@@ -353,7 +353,7 @@ public class GrapeRankAlgorithm {
             boolean hasPrev = prev != null;
             double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
 
-            if (hasPrev && prevRounded >= cutoff && newScore < cutoff) {
+            if (hasPrev && prev >= cutoff && newScore < cutoff) {
                 droppedBelowCutoffPubkeys.add(pubkey);
             } else if (hasPrev) {
                 if (Double.compare(newRounded, prevRounded) != 0) {
