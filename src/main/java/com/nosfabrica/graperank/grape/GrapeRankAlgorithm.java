@@ -378,10 +378,9 @@ public class GrapeRankAlgorithm {
                 algorithmResult.getScorecards(),
                 algorithmResult.getRounds(),
                 finalTime / 1000.0,
-                relevantUsers.size() > 1,
+                success,
                 changedScorePubkeys,
                 droppedBelowCutoffPubkeys,
-                success,
                 error);
 
     }

@@ -31,12 +31,18 @@ public class GrapeRankResult {
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success,
                            List<String> changedScorePubkeys, List<String> droppedBelowCutoffPubkeys) {
+        this(scorecards, rounds, durationSeconds, success, changedScorePubkeys, droppedBelowCutoffPubkeys, null);
+    }
+
+    public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success,
+                           List<String> changedScorePubkeys, List<String> droppedBelowCutoffPubkeys, GrapeRankError error) {
         this.scorecards = scorecards;
         this.rounds = rounds;
         this.duration_seconds = durationSeconds;
         this.success = success;
         this.changedScorePubkeys = changedScorePubkeys;
         this.droppedBelowCutoffPubkeys = droppedBelowCutoffPubkeys;
+        this.error = error;
     }
 
     public List<String> getChangedScorePubkeys() {
