@@ -2,6 +2,7 @@ package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.exceptions.ErrorCode;
 import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
@@ -11,13 +12,17 @@ import java.util.Map;
 import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class GrapeRankAlgorithm {
     private final IGraphDB db;
+    private final RedisRelationshipsHelper redis;
 
-    public GrapeRankAlgorithm(IGraphDB db) {
+    public GrapeRankAlgorithm(IGraphDB db, RedisRelationshipsHelper redis) {
         this.db = db;
+        this.redis = redis;
     }
 
     public static GrapeRankAlgorithmResult graperankAlgorithm(
@@ -193,7 +198,8 @@ public class GrapeRankAlgorithm {
     public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
         long startTime = System.currentTimeMillis();
 
-        List<String> relevantUsers = db.getUsersConnectedToObserver(observer, 992);
+        Map<String, Double> previousInfluence = db.getUsersConnectedToObserverWithPreviousInfluence(observer);
+        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
         Map<String, Double> userDistanceMap = new HashMap<>();
 
         Map<Integer, List<String>> hopsMap = new HashMap<>();
@@ -225,27 +231,44 @@ public class GrapeRankAlgorithm {
 
         Map<String, List<String>> reportersByUser = new HashMap<>();
 
+        Set<String> relevantUsersSet = new HashSet<>(relevantUsers);
+
         int iteration = 0;
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
 
             long batchStartTime = System.currentTimeMillis();
-            List<RelationshipInfo> outgoingRelationships = db.getOutgoingRelationshipsBulk(
+            List<RelationshipInfo> incomingFollowRelationships = redis.getIncomingFollowsBulk(
+                    usersBatch);
+
+            List<RelationshipInfo> incomingMuteRelationships = redis.getIncomingMutesBulk(
+                    usersBatch);
+
+            List<RelationshipInfo> incomingReportRelationships = redis.getIncomingReportsBulk(
                     usersBatch);
 
 
-            List<RelationshipInfo> incomingFollowRelationships = db.getIncomingFollowRelationshipsBulk(
-                    usersBatch);
-
-            List<RelationshipInfo> incomingReportRelationships = db.getIncomingReportRelationshipsBulk(
-                    usersBatch);
-
-            
             long batchEndTime = System.currentTimeMillis();
             System.out.println(
                     iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
+            // Raters must be in relevantUsers so every GrapeRankInput has a scorecard entry in graperankAlgorithm.
+            List<RelationshipInfo> ratingsForBatch = new ArrayList<>(
+                    incomingFollowRelationships.size()
+                            + incomingMuteRelationships.size()
+                            + incomingReportRelationships.size());
+            for (RelationshipInfo rel : incomingFollowRelationships) {
+                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
+            }
+            for (RelationshipInfo rel : incomingMuteRelationships) {
+                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
+            }
+            for (RelationshipInfo rel : incomingReportRelationships) {
+                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
+            }
+
             List<GrapeRankInput> graperankInputsOfUser = getGrapeRankInputsOfRelationships(
-                    outgoingRelationships, observer, params);
+                   ratingsForBatch, observer,params);
+
 
             for (GrapeRankInput grprIn : graperankInputsOfUser) {
                 graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
@@ -319,7 +342,29 @@ public class GrapeRankAlgorithm {
             scoreCard.setTrustedReporters((double) trustedReportersCount);
         }
 
+        List<String> changedScorePubkeys = new ArrayList<>();
+        List<String> droppedBelowCutoffPubkeys = new ArrayList<>();
+        double cutoff = 0.02;
 
+        for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
+            String pubkey = entry.getKey();
+            double newScore = entry.getValue().getInfluence();
+            double newRounded = Math.round(newScore * 100.0) / 100.0;
+
+            Double prev = previousInfluence.get(pubkey);
+            boolean hasPrev = prev != null;
+            double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
+
+            if (hasPrev && prev >= cutoff && newScore < cutoff) {
+                droppedBelowCutoffPubkeys.add(pubkey);
+            } else if (hasPrev) {
+                if (Double.compare(newRounded, prevRounded) != 0) {
+                    changedScorePubkeys.add(pubkey);
+                }
+            } else if (newScore >= cutoff) {
+                changedScorePubkeys.add(pubkey);
+            }
+        }
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
@@ -333,6 +378,9 @@ public class GrapeRankAlgorithm {
                 algorithmResult.getScorecards(),
                 algorithmResult.getRounds(),
                 finalTime / 1000.0,
+                relevantUsers.size() > 1,
+                changedScorePubkeys,
+                droppedBelowCutoffPubkeys,
                 success,
                 error);
 

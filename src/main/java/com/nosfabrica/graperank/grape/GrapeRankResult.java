@@ -3,6 +3,8 @@ package com.nosfabrica.graperank.grape;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.nosfabrica.graperank.rank.ScoreCard;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 public class GrapeRankResult {
@@ -11,6 +13,8 @@ public class GrapeRankResult {
     @JsonProperty("duration_seconds")
     private double duration_seconds;
     private boolean success = false;
+    private List<String> changedScorePubkeys = Collections.emptyList();
+    private List<String> droppedBelowCutoffPubkeys = Collections.emptyList();
     private GrapeRankError error;
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success) {
@@ -23,6 +27,32 @@ public class GrapeRankResult {
         this.duration_seconds = durationSeconds;
         this.success = success;
         this.error = error;
+    }
+
+    public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success,
+                           List<String> changedScorePubkeys, List<String> droppedBelowCutoffPubkeys) {
+        this.scorecards = scorecards;
+        this.rounds = rounds;
+        this.duration_seconds = durationSeconds;
+        this.success = success;
+        this.changedScorePubkeys = changedScorePubkeys;
+        this.droppedBelowCutoffPubkeys = droppedBelowCutoffPubkeys;
+    }
+
+    public List<String> getChangedScorePubkeys() {
+        return changedScorePubkeys;
+    }
+
+    public void setChangedScorePubkeys(List<String> changedScorePubkeys) {
+        this.changedScorePubkeys = changedScorePubkeys;
+    }
+
+    public List<String> getDroppedBelowCutoffPubkeys() {
+        return droppedBelowCutoffPubkeys;
+    }
+
+    public void setDroppedBelowCutoffPubkeys(List<String> droppedBelowCutoffPubkeys) {
+        this.droppedBelowCutoffPubkeys = droppedBelowCutoffPubkeys;
     }
 
     public Map<String, ScoreCard> getScorecards() {

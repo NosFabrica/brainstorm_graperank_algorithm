@@ -1,7 +1,9 @@
 package com.nosfabrica.graperank.db;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.neo4j.driver.*;
 import org.neo4j.driver.Record;
 
@@ -48,6 +50,57 @@ public class Neo4jHelper implements IGraphDB {
         return resultList;
     }
 
+    @Override
+    public Map<String, Double> getUsersConnectedToObserverWithPreviousInfluence(String observer) {
+        if (!observer.matches("[0-9a-fA-F]{64}")) {
+            throw new IllegalArgumentException("observer pubkey must be 64 hex chars");
+        }
+
+        String influenceProp = "influence_" + observer;
+
+        String query = "MATCH (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
+                "WHERE other <> user " +
+                "RETURN DISTINCT other.pubkey AS pubkey, other." + influenceProp + " AS influence";
+
+        Map<String, Double> result = new HashMap<>();
+
+        try (Session session = driver.session()) {
+            List<Record> records = session.readTransaction(tx -> {
+                Result statementResult = tx.run(query, Values.parameters("pubkey", observer));
+                return statementResult.list();
+            });
+
+            if (records != null && !records.isEmpty()) {
+                String observerNodeId = getNodeIdByPubkey(observer);
+                if (observerNodeId != null) {
+                    result.put(observer, getInfluenceForPubkey(observer, influenceProp));
+
+                    for (Record record : records) {
+                        String pubkey = record.get("pubkey").asString();
+                        Value infValue = record.get("influence");
+                        Double influence = infValue.isNull() ? null : infValue.asDouble();
+                        result.put(pubkey, influence);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private Double getInfluenceForPubkey(String pubkey, String influenceProp) {
+        String query = "MATCH (u:NostrUser {pubkey: $pubkey}) RETURN u." + influenceProp + " AS influence LIMIT 1";
+        try (Session session = driver.session()) {
+            Record record = session.readTransaction(tx -> {
+                Result statementResult = tx.run(query, Values.parameters("pubkey", pubkey));
+                return statementResult.single();
+            });
+            if (record == null) return null;
+            Value v = record.get("influence");
+            return v.isNull() ? null : v.asDouble();
+        }
+    }
+
     public String getNodeIdByPubkey(String pubkey) {
         String query = "MATCH (u:NostrUser {pubkey: $pubkey}) " +
                 "RETURN elementId(u) AS node_id LIMIT 1";
@@ -66,96 +119,4 @@ public class Neo4jHelper implements IGraphDB {
         }
     }
 
-    @Override
-    public List<RelationshipInfo> getIncomingFollowRelationshipsBulk(List<String> pubkeys) {
-        String query =
-                "UNWIND $pubkeys AS pubkey " +
-                "MATCH (u:NostrUser {pubkey: pubkey}) " +
-                "MATCH (source:NostrUser)-[r:FOLLOWS]->(u) " +
-                "RETURN source.pubkey AS source, " +
-                "       type(r) AS relationship, " +
-                "       u.pubkey AS target";
-
-        List<RelationshipInfo> resultList = new ArrayList<>();
-
-        try (Session session = driver.session()) {
-            session.executeRead(tx -> {
-                Result result = tx.run(query, Values.parameters("pubkeys", pubkeys));
-
-                while (result.hasNext()) {
-                    Record record = result.next();
-                    resultList.add(new RelationshipInfo(
-                            record.get("source").asString(),
-                            record.get("relationship").asString(),
-                            record.get("target").asString()
-                    ));
-                }
-                return null;
-            });
-        }
-
-        return resultList;
-    }
-
-    @Override
-    public List<RelationshipInfo> getIncomingReportRelationshipsBulk(List<String> pubkeys) {
-        String query =
-                "UNWIND $pubkeys AS pubkey " +
-                "MATCH (u:NostrUser {pubkey: pubkey}) " +
-                "MATCH (source:NostrUser)-[r:REPORTS]->(u) " +
-                "RETURN source.pubkey AS source, " +
-                "       type(r) AS relationship, " +
-                "       u.pubkey AS target";
-
-        List<RelationshipInfo> resultList = new ArrayList<>();
-
-        try (Session session = driver.session()) {
-            session.executeRead(tx -> {
-                Result result = tx.run(query, Values.parameters("pubkeys", pubkeys));
-
-                while (result.hasNext()) {
-                    Record record = result.next();
-                    resultList.add(new RelationshipInfo(
-                            record.get("source").asString(),
-                            record.get("relationship").asString(),
-                            record.get("target").asString()
-                    ));
-                }
-                return null;
-            });
-        }
-
-        return resultList;
-    }
-
-    @Override
-    public List<RelationshipInfo> getOutgoingRelationshipsBulk(List<String> pubkeys) {
-        String query =
-                "UNWIND $pubkeys AS pubkey " +
-                        "MATCH (u:NostrUser {pubkey: pubkey}) " +
-                        "MATCH (u)-[r:FOLLOWS|REPORTS|MUTES]->(target:NostrUser) " +
-                        "RETURN u.pubkey AS source, " +
-                        "       type(r) AS relationship, " +
-                        "       target.pubkey AS target";
-
-        List<RelationshipInfo> resultList = new ArrayList<>();
-
-        try (Session session = driver.session()) {
-            session.executeRead(tx -> {
-                Result result = tx.run(query, Values.parameters("pubkeys", pubkeys));
-
-                while (result.hasNext()) {
-                    Record record = result.next();
-                    resultList.add(new RelationshipInfo(
-                            record.get("source").asString(),
-                            record.get("relationship").asString(),
-                            record.get("target").asString()
-                    ));
-                }
-                return null;
-            });
-        }
-
-        return resultList;
-    }
 }

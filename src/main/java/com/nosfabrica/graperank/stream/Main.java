@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import java.util.Map;
@@ -129,9 +130,12 @@ public class Main {
 
             processJobStarted(privateId);
 
+
             GrapeRankResult result;
             try {
-                GrapeRankAlgorithm helper = new GrapeRankAlgorithm(new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD));
+                GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
+                    new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
+                    new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
                 result = helper.graperankAllSteps(observer, params);
             } catch (Exception e) {
                 System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
@@ -139,6 +143,7 @@ public class Main {
                 pushFailureResult(redis, privateId, GrapeRankAlgorithmException.fromThrowable(e).toError());
                 return;
             }
+
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
             String finalJson = mapper.writeValueAsString(finalMessage);

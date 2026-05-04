@@ -3,6 +3,7 @@ package com.nosfabrica.graperank.stream;
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
 
@@ -13,7 +14,8 @@ public class MainTest {
 
         GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
             // TODO: Mock the DB
-            new Neo4jHelper("neo4j://host.docker.internal:7687","neo4j","password")
+            new Neo4jHelper("neo4j://host.docker.internal:7687","neo4j","password"),
+            new RedisRelationshipsHelper("host.docker.internal", 6379)
         );
 
         GrapeRankResult result = helper.graperankAllSteps(observer);
