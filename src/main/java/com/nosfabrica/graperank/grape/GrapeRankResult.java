@@ -15,12 +15,18 @@ public class GrapeRankResult {
     private boolean success = false;
     private List<String> changedScorePubkeys = Collections.emptyList();
     private List<String> droppedBelowCutoffPubkeys = Collections.emptyList();
+    private GrapeRankError error;
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success) {
+        this(scorecards, rounds, durationSeconds, success, null);
+    }
+
+    public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success, GrapeRankError error) {
         this.scorecards = scorecards;
         this.rounds = rounds;
         this.duration_seconds = durationSeconds;
         this.success = success;
+        this.error = error;
     }
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success,
@@ -79,5 +85,13 @@ public class GrapeRankResult {
 
     public void setSuccess(boolean success) {
         this.success = success;
+    }
+
+    public GrapeRankError getError() {
+        return error;
+    }
+
+    public void setError(GrapeRankError error) {
+        this.error = error;
     }
 }

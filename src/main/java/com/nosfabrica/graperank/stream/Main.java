@@ -13,7 +13,10 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.nosfabrica.graperank.exceptions.ErrorCode;
+import com.nosfabrica.graperank.exceptions.GrapeRankAlgorithmException;
 import com.nosfabrica.graperank.grape.GrapeRankAlgorithm;
+import com.nosfabrica.graperank.grape.GrapeRankError;
 import com.nosfabrica.graperank.grape.GrapeRankParams;
 import com.nosfabrica.graperank.grape.GrapeRankResult;
 
@@ -78,12 +81,12 @@ public class Main {
         return mapper.treeToValue(paramsNode, GrapeRankParams.class);
     }
 
-    private static void pushFailureResult(Jedis redis, int privateId, String reason) {
+    private static void pushFailureResult(Jedis redis, int privateId, GrapeRankError error) {
         try {
-            GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false);
+            GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false, error);
             MessageQueueReturnValue msg = new MessageQueueReturnValue(failure, privateId);
             redis.rpush(RESULTS_QUEUE_NAME, mapper.writeValueAsString(msg));
-            System.err.println("Pushed failure result for privateId " + privateId + ": " + reason);
+            System.err.println("Pushed failure result for privateId " + privateId + ": " + error.getCode() + " - " + error.getMessage());
         } catch (Exception e) {
             System.err.println("Failed to push failure result for privateId " + privateId + ": " + e.getMessage());
         }
@@ -119,7 +122,7 @@ public class Main {
                 params = resolveParams(parsed.get("graperank_params"));
             } catch (Exception e) {
                 System.err.println("Malformed graperank_params for privateId " + privateId + ", marking FAILED: " + e.getMessage());
-                pushFailureResult(redis, privateId, e.getMessage());
+                pushFailureResult(redis, privateId, new GrapeRankError(ErrorCode.MALFORMED_PARAMS, e.getMessage()));
                 return;
             }
 
@@ -128,10 +131,18 @@ public class Main {
             processJobStarted(privateId);
 
 
-            GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
+            GrapeRankResult result;
+            try {
+                GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
                     new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
                     new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
-            GrapeRankResult result = helper.graperankAllSteps(observer,params);
+                result = helper.graperankAllSteps(observer, params);
+            } catch (Exception e) {
+                System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
+                e.printStackTrace();
+                pushFailureResult(redis, privateId, GrapeRankAlgorithmException.fromThrowable(e).toError());
+                return;
+            }
 
 
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
