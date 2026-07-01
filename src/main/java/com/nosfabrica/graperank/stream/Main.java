@@ -7,6 +7,7 @@ import com.nosfabrica.graperank.db.Neo4jHelper;
 import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -22,7 +23,7 @@ import com.nosfabrica.graperank.grape.GrapeRankResult;
 
 public class Main {
 
-    private static final String QUEUE_NAME = "message_queue";
+    private static final String[] QUEUE_NAMES = Scheduler.resolve();
     private static final String JOB_STARTED_QUEUE_NAME = "job_started_queue";
     private static final String RESULTS_QUEUE_NAME = "results_message_queue";
     private static final String UPLOAD_NOSTR_RESULTS_QUEUE_NAME = "nostr_results_message_queue";
@@ -43,12 +44,12 @@ public class Main {
     public static void main(String[] args) {
         while (true) { // reconnect loop
             try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
-                System.out.println("Connected to Redis. Waiting for messages on '" + QUEUE_NAME + "'...");
+                System.out.println("Connected to Redis. Waiting for priority queues: " + Arrays.toString(QUEUE_NAMES));
 
                 while (true) { // consume loop
                     try {
                         // timeout = 30 seconds instead of 0
-                        List<String> result = redis.blpop(30, QUEUE_NAME);
+                        List<String> result = redis.blpop(30, QUEUE_NAMES);
 
                         if (result != null && result.size() == 2) {
                             String message = result.get(1);
