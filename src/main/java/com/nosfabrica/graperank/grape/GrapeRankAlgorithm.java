@@ -355,13 +355,17 @@ public class GrapeRankAlgorithm {
             boolean hasPrev = prev != null;
             double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
 
-            if (hasPrev && prev >= cutoff && newScore < cutoff) {
+            // Compare on the 2-decimal rounded value, matching the publish/index
+            // gates (`round(influence, 2) >= cutoff` on both the relay and Vespa
+            // sides). Using the raw score here would miss a new score like 0.0195
+            // that rounds to 0.02 (published, but not flagged as changed).
+            if (hasPrev && prevRounded >= cutoff && newRounded < cutoff) {
                 droppedBelowCutoffPubkeys.add(pubkey);
             } else if (hasPrev) {
                 if (Double.compare(newRounded, prevRounded) != 0) {
                     changedScorePubkeys.add(pubkey);
                 }
-            } else if (newScore >= cutoff) {
+            } else if (newRounded >= cutoff) {
                 changedScorePubkeys.add(pubkey);
             }
         }
