@@ -86,7 +86,7 @@ public class GrapeRankAlgorithm {
         }
 
         for (ScoreCard scorecard : graperankScorecards.values()) {
-            scorecard.setVerified(scorecard.getInfluence() >= params.verifiedFollowersInfluenceCutoff());
+            scorecard.setVerified(scorecard.getInfluence() > params.verifiedFollowersInfluenceCutoff());
         }
 
         return new GrapeRankAlgorithmResult(graperankScorecards, rounds);
