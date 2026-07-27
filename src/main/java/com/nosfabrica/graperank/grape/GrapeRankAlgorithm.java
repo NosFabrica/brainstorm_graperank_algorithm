@@ -198,20 +198,26 @@ public class GrapeRankAlgorithm {
     public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
         long startTime = System.currentTimeMillis();
 
+        long prevInfluenceStartTime = System.currentTimeMillis();
         Map<String, Double> previousInfluence = db.getUsersConnectedToObserverWithPreviousInfluence(observer);
         List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
         Map<String, Double> userDistanceMap = new HashMap<>();
+        System.out.println("TIMING previous-influence fetch took "
+                + (System.currentTimeMillis() - prevInfluenceStartTime) / 1000.0
+                + " seconds (" + relevantUsers.size() + " relevant users)");
 
         Map<Integer, List<String>> hopsMap = new HashMap<>();
-        hopsMap.put(8, db.getUsersConnectedToObserver(observer, 8));
-        hopsMap.put(7, db.getUsersConnectedToObserver(observer, 7));
-        hopsMap.put(6, db.getUsersConnectedToObserver(observer, 6));
-        hopsMap.put(5, db.getUsersConnectedToObserver(observer, 5));
-        hopsMap.put(4, db.getUsersConnectedToObserver(observer, 4));
-        hopsMap.put(3, db.getUsersConnectedToObserver(observer, 3));
-        hopsMap.put(2, db.getUsersConnectedToObserver(observer, 2));
-        hopsMap.put(1, db.getUsersConnectedToObserver(observer, 1));
-
+        long hopsStartTime = System.currentTimeMillis();
+        for (int hop = 8; hop >= 1; hop--) {
+            long hopStartTime = System.currentTimeMillis();
+            List<String> usersAtHop = db.getUsersConnectedToObserver(observer, hop);
+            hopsMap.put(hop, usersAtHop);
+            System.out.println("TIMING hop query " + hop + " took "
+                    + (System.currentTimeMillis() - hopStartTime) / 1000.0
+                    + " seconds (" + usersAtHop.size() + " users)");
+        }
+        System.out.println("TIMING all 8 hop queries took "
+                + (System.currentTimeMillis() - hopsStartTime) / 1000.0 + " seconds");
 
         for (int hop = 8; hop >= 1; hop--) {
             List<String> usersAtHop = hopsMap.get(hop);
@@ -233,6 +239,9 @@ public class GrapeRankAlgorithm {
 
         Set<String> relevantUsersSet = new HashSet<>(relevantUsers);
 
+        long gatherStartTime = System.currentTimeMillis();
+        long redisFetchMillis = 0;
+        long edgeCount = 0;
         int iteration = 0;
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
 
@@ -248,6 +257,7 @@ public class GrapeRankAlgorithm {
 
 
             long batchEndTime = System.currentTimeMillis();
+            redisFetchMillis += batchEndTime - batchStartTime;
             System.out.println(
                     iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
@@ -270,6 +280,7 @@ public class GrapeRankAlgorithm {
                    ratingsForBatch, observer,params);
 
 
+            edgeCount += graperankInputsOfUser.size();
             for (GrapeRankInput grprIn : graperankInputsOfUser) {
                 graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
             }
@@ -297,7 +308,16 @@ public class GrapeRankAlgorithm {
             iteration++;
         }
 
+        long gatherMillis = System.currentTimeMillis() - gatherStartTime;
+        System.out.println("TIMING relationship gather took " + gatherMillis / 1000.0
+                + " seconds (redis " + redisFetchMillis / 1000.0
+                + "s, build " + (gatherMillis - redisFetchMillis) / 1000.0
+                + "s, " + edgeCount + " edges)");
+
+        long initStartTime = System.currentTimeMillis();
         Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
+        System.out.println("TIMING scorecard init took "
+                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
 
         long algoStartTime = System.currentTimeMillis();
         GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards, params);
@@ -306,6 +326,7 @@ public class GrapeRankAlgorithm {
 
 
         System.out.println("Getting trusted followers for each pubkey...");
+        long trustedStartTime = System.currentTimeMillis();
         Map<String, ScoreCard> finalScorecards = algorithmResult.getScorecards();
 
         for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
@@ -342,6 +363,10 @@ public class GrapeRankAlgorithm {
             scoreCard.setTrustedReporters((double) trustedReportersCount);
         }
 
+        System.out.println("TIMING trusted follower/reporter counts took "
+                + (System.currentTimeMillis() - trustedStartTime) / 1000.0 + " seconds");
+
+        long diffStartTime = System.currentTimeMillis();
         List<String> changedScorePubkeys = new ArrayList<>();
         List<String> droppedBelowCutoffPubkeys = new ArrayList<>();
         double cutoff = 0.02;
@@ -369,6 +394,9 @@ public class GrapeRankAlgorithm {
                 changedScorePubkeys.add(pubkey);
             }
         }
+
+        System.out.println("TIMING changed/dropped diff took "
+                + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
