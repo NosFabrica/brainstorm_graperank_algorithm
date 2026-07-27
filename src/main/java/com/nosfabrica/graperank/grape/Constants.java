@@ -16,6 +16,10 @@ public class Constants {
 
     public static final double THRESHOLD_OF_LOOP_BREAK_GIVEN_MINIMUM_DELTA_INFLUENCE = 0.0001;
 
+    // "No follow path from the observer within the hop limit". Published as a
+    // scorecard `hops` value; the server omits the TA's `hops` tag at it.
+    public static final double UNREACHABLE_HOPS = 999;
+
     public static final double DEFAULT_CUTOFF_OF_VALID_USER = 0.02;
 
     public static final double DEFAULT_CUTOFF_OF_TRUSTED_REPORTER = 0.1;

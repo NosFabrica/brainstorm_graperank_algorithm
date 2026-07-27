@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-public class RedisRelationshipsHelper {
+public class RedisRelationshipsHelper implements IRelationshipsCache {
 
     private static final String FOLLOWED_BY_KEY_PREFIX = "followed_by:";
     private static final String MUTED_BY_KEY_PREFIX = "muted_by:";
@@ -22,14 +22,17 @@ public class RedisRelationshipsHelper {
         this.port = port;
     }
 
+    @Override
     public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {
         return getIncomingBulk(pubkeys, FOLLOWED_BY_KEY_PREFIX, "FOLLOWS");
     }
 
+    @Override
     public List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys) {
         return getIncomingBulk(pubkeys, MUTED_BY_KEY_PREFIX, "MUTES");
     }
 
+    @Override
     public List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys) {
         return getIncomingBulk(pubkeys, REPORTED_BY_KEY_PREFIX, "REPORTS");
     }

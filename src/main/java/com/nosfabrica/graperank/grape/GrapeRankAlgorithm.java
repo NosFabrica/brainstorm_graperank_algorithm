@@ -1,8 +1,7 @@
 package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
-import com.nosfabrica.graperank.db.Neo4jHelper;
-import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
+import com.nosfabrica.graperank.db.IRelationshipsCache;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.exceptions.ErrorCode;
 import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
@@ -18,11 +17,11 @@ import java.util.Set;
 
 public class GrapeRankAlgorithm {
     private final IGraphDB db;
-    private final RedisRelationshipsHelper redis;
+    private final IRelationshipsCache relationshipsCache;
 
-    public GrapeRankAlgorithm(IGraphDB db, RedisRelationshipsHelper redis) {
+    public GrapeRankAlgorithm(IGraphDB db, IRelationshipsCache relationshipsCache) {
         this.db = db;
-        this.redis = redis;
+        this.relationshipsCache = relationshipsCache;
     }
 
     public static GrapeRankAlgorithmResult graperankAlgorithm(
@@ -162,7 +161,7 @@ public class GrapeRankAlgorithm {
 
         for (String user : relevantUsers) {
             if (!user.equals(observer)) {
-                Double distance = userDistanceMap.getOrDefault(user,(double) 999);
+                Double distance = userDistanceMap.getOrDefault(user, Constants.UNREACHABLE_HOPS);
                 
 
                 result.put(user, new ScoreCard(observer, user, distance));
@@ -179,6 +178,22 @@ public class GrapeRankAlgorithm {
         }
 
         return result;
+    }
+
+    /** How many of `ratee`'s raters clear `cutoff` — raw Influence, strict `>`.
+     * The one rule behind the trusted follower / reporter / muter counts, which
+     * differ only in which reverse-set and which preset cutoff they read. */
+    private static double countTrustedRaters(
+            Map<String, List<String>> ratersByRatee,
+            String ratee,
+            Map<String, ScoreCard> scorecards,
+            double cutoff) {
+        return ratersByRatee.getOrDefault(ratee, Collections.emptyList()).stream()
+                .filter(rater -> {
+                    ScoreCard raterScoreCard = scorecards.get(rater);
+                    return raterScoreCard != null && raterScoreCard.getInfluence() > cutoff;
+                })
+                .count();
     }
 
     private static final int BATCH_SIZE = 1000;
@@ -235,6 +250,8 @@ public class GrapeRankAlgorithm {
 
         Map<String, List<String>> followersByUser = new HashMap<>();
 
+        Map<String, List<String>> mutersByUser = new HashMap<>();
+
         Map<String, List<String>> reportersByUser = new HashMap<>();
 
         Set<String> relevantUsersSet = new HashSet<>(relevantUsers);
@@ -246,13 +263,13 @@ public class GrapeRankAlgorithm {
         for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
 
             long batchStartTime = System.currentTimeMillis();
-            List<RelationshipInfo> incomingFollowRelationships = redis.getIncomingFollowsBulk(
+            List<RelationshipInfo> incomingFollowRelationships = relationshipsCache.getIncomingFollowsBulk(
                     usersBatch);
 
-            List<RelationshipInfo> incomingMuteRelationships = redis.getIncomingMutesBulk(
+            List<RelationshipInfo> incomingMuteRelationships = relationshipsCache.getIncomingMutesBulk(
                     usersBatch);
 
-            List<RelationshipInfo> incomingReportRelationships = redis.getIncomingReportsBulk(
+            List<RelationshipInfo> incomingReportRelationships = relationshipsCache.getIncomingReportsBulk(
                     usersBatch);
 
 
@@ -295,9 +312,19 @@ public class GrapeRankAlgorithm {
                     .add(follower);
             }
 
+            for (RelationshipInfo rel : incomingMuteRelationships) {
+
+                String mutedUser = rel.getTarget();
+                String muter = rel.getSource();
+
+                mutersByUser
+                    .computeIfAbsent(mutedUser, k -> new ArrayList<>())
+                    .add(muter);
+            }
+
             for (RelationshipInfo rel : incomingReportRelationships) {
 
-                String reportedUser = rel.getTarget(); 
+                String reportedUser = rel.getTarget();
                 String reporter = rel.getSource();     
 
                 reportersByUser
@@ -333,34 +360,12 @@ public class GrapeRankAlgorithm {
             String userPubkey = entry.getKey();
             ScoreCard scoreCard = entry.getValue();
 
-            
-            List<String> followers = followersByUser.getOrDefault(userPubkey, Collections.emptyList());
-
-
-            long trustedFollowersCount = followers.stream()
-                .filter(followerPubkey -> {
-                    ScoreCard followerScoreCard = finalScorecards.get(followerPubkey);
-                    return followerScoreCard != null && followerScoreCard.getInfluence() > params.verifiedFollowersInfluenceCutoff();
-                })
-                .count();
-
-
-            scoreCard.setTrustedFollowers((double) trustedFollowersCount);
-
-            //
-
-            List<String> reporters = reportersByUser.getOrDefault(userPubkey, Collections.emptyList());
-
-
-            long trustedReportersCount = reporters.stream()
-                .filter(reporterPubkey -> {
-                    ScoreCard reporterScoreCard = finalScorecards.get(reporterPubkey);
-                    return reporterScoreCard != null && reporterScoreCard.getInfluence() > params.verifiedReportersInfluenceCutoff();
-                })
-                .count();
-
-
-            scoreCard.setTrustedReporters((double) trustedReportersCount);
+            scoreCard.setTrustedFollowers(countTrustedRaters(
+                    followersByUser, userPubkey, finalScorecards, params.verifiedFollowersInfluenceCutoff()));
+            scoreCard.setTrustedReporters(countTrustedRaters(
+                    reportersByUser, userPubkey, finalScorecards, params.verifiedReportersInfluenceCutoff()));
+            scoreCard.setTrustedMuters(countTrustedRaters(
+                    mutersByUser, userPubkey, finalScorecards, params.verifiedMutersInfluenceCutoff()));
         }
 
         System.out.println("TIMING trusted follower/reporter counts took "
