@@ -17,8 +17,27 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # The image build runs `-DskipTests`, so the suite runs in its own job.
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Run tests
+        run: mvn -B test
+
   build:
     name: Build and push image
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
