@@ -13,6 +13,7 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <slf4j.version>2.0.13</slf4j.version>
+        <junit.version>5.10.2</junit.version>
     </properties>
 
     <dependencies>
@@ -46,6 +47,14 @@
             <artifactId>slf4j-simple</artifactId>
             <version>${slf4j.version}</version>
         </dependency>
+
+        <!-- Tests -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -60,6 +69,13 @@
                     <source>17</source>
                     <target>17</target>
                 </configuration>
+            </plugin>
+
+            <!-- JUnit 5 runner -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
             </plugin>
 
             <!-- Fat JAR with Main-Class -->

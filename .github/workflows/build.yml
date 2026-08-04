@@ -29,6 +29,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The image build runs `-DskipTests`, so the suite needs its own step.
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Run tests
+        run: mvn -B test
+
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@v3.3.0
         with:
