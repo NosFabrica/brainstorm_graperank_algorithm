@@ -144,7 +144,8 @@ public class Main {
 
             List<String> designatedPubkeys = resolveDesignatedPubkeys(parsed.get("designated_pubkeys"));
 
-            System.out.println("Processing message: " + privateId);
+            System.out.println("Processing message: " + privateId
+                    + " (" + designatedPubkeys.size() + " designated keys)");
 
             processJobStarted(privateId);
 

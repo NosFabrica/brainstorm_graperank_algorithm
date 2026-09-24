@@ -458,7 +458,9 @@ public class GrapeRankAlgorithm {
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
-        boolean success = relevantUsers.size() > 1;
+        // Graph users only: designated keys are added regardless of the graph, so an
+        // Observer with no follows but a kind-10040 is still "not connected".
+        boolean success = previousInfluence.size() > 1;
         GrapeRankError error = success
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
