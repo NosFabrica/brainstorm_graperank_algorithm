@@ -7,6 +7,7 @@ import com.nosfabrica.graperank.exceptions.ErrorCode;
 import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
 import com.nosfabrica.graperank.rank.ScoreCard;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.Collections;
 import java.util.ArrayList;
@@ -28,6 +29,16 @@ public class GrapeRankAlgorithm {
             Map<String, List<GrapeRankInput>> graperankInputs,
             Map<String, ScoreCard> graperankScorecards,
             GrapeRankParams params) {
+        return graperankAlgorithm(graperankInputs, graperankScorecards, params, Set.of());
+    }
+
+    /** `pinnedUsers` keep the Influence their scorecard was seeded with — like the
+     * Observer, their scorecard is never recomputed from ratings. */
+    public static GrapeRankAlgorithmResult graperankAlgorithm(
+            Map<String, List<GrapeRankInput>> graperankInputs,
+            Map<String, ScoreCard> graperankScorecards,
+            GrapeRankParams params,
+            Set<String> pinnedUsers) {
 
         int rounds = 0;
         boolean shouldBreak;
@@ -38,7 +49,8 @@ public class GrapeRankAlgorithm {
             for (Map.Entry<String, ScoreCard> entry : graperankScorecards.entrySet()) {
                 ScoreCard scorecard = entry.getValue();
 
-                if (scorecard.getObserver().equals(scorecard.getObservee())) {
+                if (scorecard.getObserver().equals(scorecard.getObservee())
+                        || pinnedUsers.contains(scorecard.getObservee())) {
                     continue;
                 }
 
@@ -180,6 +192,31 @@ public class GrapeRankAlgorithm {
         return result;
     }
 
+    /** Pubkeys the Observer designated in their kind-10040 (the keys they trust to
+     * publish assertions for them), minus the Observer. */
+    static Set<String> designatedUsersOf(String observer, Collection<String> designatedPubkeys) {
+        Set<String> designated = new HashSet<>();
+        if (designatedPubkeys != null) {
+            for (String pubkey : designatedPubkeys) {
+                if (pubkey != null && !pubkey.equals(observer)) {
+                    designated.add(pubkey);
+                }
+            }
+        }
+        return designated;
+    }
+
+    /** Seed each designated key's scorecard at the fixed designated Influence. */
+    static void pinDesignatedScorecards(Map<String, ScoreCard> scorecards, Set<String> designated) {
+        for (String pubkey : designated) {
+            ScoreCard scorecard = scorecards.get(pubkey);
+            scorecard.setAverageScore(Constants.DESIGNATED_KEY_INFLUENCE);
+            scorecard.setInput(Double.POSITIVE_INFINITY);
+            scorecard.setConfidence(1.0);
+            scorecard.setInfluence(Constants.DESIGNATED_KEY_INFLUENCE);
+        }
+    }
+
     /** How many of `ratee`'s raters clear `cutoff` — raw Influence, strict `>`.
      * The one rule behind the trusted follower / reporter / muter counts, which
      * differ only in which reverse-set and which preset cutoff they read. */
@@ -211,11 +248,25 @@ public class GrapeRankAlgorithm {
     }
 
     public GrapeRankResult graperankAllSteps(String observer, GrapeRankParams params) {
+        return graperankAllSteps(observer, params, List.of());
+    }
+
+    /** `designatedPubkeys`: the keys the Observer listed in their kind-10040. They
+     * are scored at {@link Constants#DESIGNATED_KEY_INFLUENCE} regardless of the
+     * graph, and scored even when the Observer's graph never reaches them. */
+    public GrapeRankResult graperankAllSteps(
+            String observer, GrapeRankParams params, Collection<String> designatedPubkeys) {
         long startTime = System.currentTimeMillis();
 
         long prevInfluenceStartTime = System.currentTimeMillis();
         Map<String, Double> previousInfluence = db.getUsersConnectedToObserverWithPreviousInfluence(observer);
         List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
+        Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
+        for (String pubkey : designatedUsers) {
+            if (!previousInfluence.containsKey(pubkey)) {
+                relevantUsers.add(pubkey);
+            }
+        }
         Map<String, Double> userDistanceMap = new HashMap<>();
         System.out.println("TIMING previous-influence fetch took "
                 + (System.currentTimeMillis() - prevInfluenceStartTime) / 1000.0
@@ -343,11 +394,12 @@ public class GrapeRankAlgorithm {
 
         long initStartTime = System.currentTimeMillis();
         Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
+        pinDesignatedScorecards(scorecards, designatedUsers);
         System.out.println("TIMING scorecard init took "
                 + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
 
         long algoStartTime = System.currentTimeMillis();
-        GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards, params);
+        GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards, params, designatedUsers);
         long algoEndTime = System.currentTimeMillis();
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 

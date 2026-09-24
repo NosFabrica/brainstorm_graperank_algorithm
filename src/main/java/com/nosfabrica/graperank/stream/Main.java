@@ -7,6 +7,7 @@ import com.nosfabrica.graperank.db.Neo4jHelper;
 import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.HashMap;
@@ -82,6 +83,20 @@ public class Main {
         return mapper.treeToValue(paramsNode, GrapeRankParams.class);
     }
 
+    /** Optional: the pubkeys in the Observer's kind-10040. Absent or malformed
+     * means none — designation is an addition to the run, never a reason to fail it. */
+    private static List<String> resolveDesignatedPubkeys(JsonNode node) {
+        List<String> pubkeys = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode item : node) {
+                if (item.isTextual()) {
+                    pubkeys.add(item.asText());
+                }
+            }
+        }
+        return pubkeys;
+    }
+
     private static void pushFailureResult(Jedis redis, int privateId, GrapeRankError error) {
         try {
             GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false, error);
@@ -127,6 +142,8 @@ public class Main {
                 return;
             }
 
+            List<String> designatedPubkeys = resolveDesignatedPubkeys(parsed.get("designated_pubkeys"));
+
             System.out.println("Processing message: " + privateId);
 
             processJobStarted(privateId);
@@ -137,7 +154,7 @@ public class Main {
                 GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
                     new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
                     new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
-                result = helper.graperankAllSteps(observer, params);
+                result = helper.graperankAllSteps(observer, params, designatedPubkeys);
             } catch (Exception e) {
                 System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
                 e.printStackTrace();

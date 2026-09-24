@@ -77,6 +77,15 @@ final class ObserverMuterSubjectFixture {
             double verifiedFollowersInfluenceCutoff,
             double verifiedReportersInfluenceCutoff,
             double verifiedMutersInfluenceCutoff) {
+        return run(verifiedFollowersInfluenceCutoff, verifiedReportersInfluenceCutoff,
+                verifiedMutersInfluenceCutoff, List.of());
+    }
+
+    static Map<String, ScoreCard> run(
+            double verifiedFollowersInfluenceCutoff,
+            double verifiedReportersInfluenceCutoff,
+            double verifiedMutersInfluenceCutoff,
+            List<String> designatedPubkeys) {
         GrapeRankParams params = new GrapeRankParams(
                 Constants.GLOBAL_RIGOR,
                 Constants.GLOBAL_ATTENUATION_FACTOR,
@@ -93,7 +102,7 @@ final class ObserverMuterSubjectFixture {
 
         GrapeRankResult result =
                 new GrapeRankAlgorithm(new FakeGraphDB(), new FakeRelationshipsCache())
-                        .graperankAllSteps(OBSERVER, params);
+                        .graperankAllSteps(OBSERVER, params, designatedPubkeys);
 
         assertTrue(result.isSuccess(), "expected a successful run");
         return result.getScorecards();

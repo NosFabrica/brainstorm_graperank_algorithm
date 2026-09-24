@@ -20,6 +20,10 @@ public class Constants {
     // scorecard `hops` value; the server omits the TA's `hops` tag at it.
     public static final double UNREACHABLE_HOPS = 999;
 
+    // Fixed Influence (a published rank of 95) for every key the Observer listed
+    // in their kind-10040 — the keys they designated to publish assertions.
+    public static final double DESIGNATED_KEY_INFLUENCE = 0.95;
+
     public static final double DEFAULT_CUTOFF_OF_VALID_USER = 0.02;
 
     public static final double DEFAULT_CUTOFF_OF_TRUSTED_REPORTER = 0.1;
