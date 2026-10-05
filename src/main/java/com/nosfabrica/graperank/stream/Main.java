@@ -42,7 +42,12 @@ public class Main {
             .configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
     private static final ExecutorService executor = Executors.newFixedThreadPool(4);
 
+    // One driver per process: a driver per message leaked its pool and native buffers.
+    private static final Neo4jHelper neo4jHelper = new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD);
+
     public static void main(String[] args) {
+        Runtime.getRuntime().addShutdownHook(new Thread(neo4jHelper::close));
+
         while (true) { // reconnect loop
             try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
                 System.out.println("Connected to Redis. Waiting for priority queues: " + Arrays.toString(QUEUE_NAMES));
@@ -153,7 +158,7 @@ public class Main {
             GrapeRankResult result;
             try {
                 GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
-                    new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD),
+                    neo4jHelper,
                     new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT));
                 result = helper.graperankAllSteps(observer, params, designatedPubkeys);
             } catch (Exception e) {
