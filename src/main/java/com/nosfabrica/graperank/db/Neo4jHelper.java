@@ -6,12 +6,17 @@ import java.util.Map;
 import org.neo4j.driver.*;
 import org.neo4j.driver.Record;
 
-public class Neo4jHelper implements IGraphDB {
+public class Neo4jHelper implements IGraphDB, AutoCloseable {
 
     private final Driver driver;
 
     public Neo4jHelper(String uri, String username, String passwd) {
         this.driver = GraphDatabase.driver(uri, AuthTokens.basic(username, passwd));
+    }
+
+    @Override
+    public void close() {
+        driver.close();
     }
 
     @Override
