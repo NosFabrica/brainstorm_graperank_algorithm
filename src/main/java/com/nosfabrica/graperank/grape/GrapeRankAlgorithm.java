@@ -2,6 +2,7 @@ package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.IRelationshipsCache;
+import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.exceptions.ErrorCode;
 import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
@@ -258,8 +259,16 @@ public class GrapeRankAlgorithm {
             String observer, GrapeRankParams params, Collection<String> designatedPubkeys) {
         long startTime = System.currentTimeMillis();
 
-        long prevInfluenceStartTime = System.currentTimeMillis();
-        Map<String, Double> previousInfluence = db.getUsersConnectedToObserverWithPreviousInfluence(observer);
+        long reachStartTime = System.currentTimeMillis();
+        Map<String, ReachableUser> reachable = db.getReachableUsers(observer);
+        Map<String, Double> previousInfluence = new HashMap<>();
+        Map<String, Double> userDistanceMap = new HashMap<>();
+        for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
+            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            if (entry.getValue().hops() <= Constants.MAX_HOPS) {
+                userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
+            }
+        }
         List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
         Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
         for (String pubkey : designatedUsers) {
@@ -267,32 +276,10 @@ public class GrapeRankAlgorithm {
                 relevantUsers.add(pubkey);
             }
         }
-        Map<String, Double> userDistanceMap = new HashMap<>();
-        System.out.println("TIMING previous-influence fetch took "
-                + (System.currentTimeMillis() - prevInfluenceStartTime) / 1000.0
-                + " seconds (" + relevantUsers.size() + " relevant users)");
-
-        Map<Integer, List<String>> hopsMap = new HashMap<>();
-        long hopsStartTime = System.currentTimeMillis();
-        for (int hop = 8; hop >= 1; hop--) {
-            long hopStartTime = System.currentTimeMillis();
-            List<String> usersAtHop = db.getUsersConnectedToObserver(observer, hop);
-            hopsMap.put(hop, usersAtHop);
-            System.out.println("TIMING hop query " + hop + " took "
-                    + (System.currentTimeMillis() - hopStartTime) / 1000.0
-                    + " seconds (" + usersAtHop.size() + " users)");
-        }
-        System.out.println("TIMING all 8 hop queries took "
-                + (System.currentTimeMillis() - hopsStartTime) / 1000.0 + " seconds");
-
-        for (int hop = 8; hop >= 1; hop--) {
-            List<String> usersAtHop = hopsMap.get(hop);
-            for (String user : usersAtHop) {
-                userDistanceMap.put(user, (double) hop);
-            }
-        }
-
-
+        System.out.println("TIMING reachable-users fetch took "
+                + (System.currentTimeMillis() - reachStartTime) / 1000.0
+                + " seconds (" + relevantUsers.size() + " relevant users, "
+                + userDistanceMap.size() + " within " + Constants.MAX_HOPS + " hops)");
 
         int numOfIts = (int) Math.round((double) relevantUsers.size() / BATCH_SIZE);
         System.out.println("How many Neo4j iterations: " + numOfIts);

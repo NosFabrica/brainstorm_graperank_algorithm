@@ -1,6 +1,5 @@
 package com.nosfabrica.graperank.db;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,53 +15,21 @@ public class Neo4jHelper implements IGraphDB {
     }
 
     @Override
-    public List<String> getUsersConnectedToObserver(String observer, Integer hopsLimit) {
-        String hopsLimitStr = (hopsLimit != null) ? hopsLimit.toString() : "";
-
-        String query = "MATCH (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1.." + hopsLimitStr +
-                "]->(other:NostrUser) " +
-                "WHERE other <> user " +
-                "RETURN DISTINCT elementId(other) AS node_id, other.pubkey AS pubkey";
-
-        List<String> resultList = new ArrayList<>();
-
-        try (Session session = driver.session()) {
-
-            List<Record> result = session.readTransaction(tx -> {
-                Result statementResult = tx.run(query, Values.parameters("pubkey", observer));
-                return statementResult.list();
-            });
-
-            if (result != null && !result.isEmpty()) {
-                String observerNodeId = getNodeIdByPubkey(observer); // Get observer node ID
-
-                if (observerNodeId != null) {
-                    resultList.add(observer);
-
-                    for (Record record : result) {
-                        String pubkey = record.get("pubkey").asString();
-                        resultList.add(pubkey);
-                    }
-                }
-            }
-        }
-
-        return resultList;
-    }
-
-    @Override
-    public Map<String, Double> getUsersConnectedToObserverWithPreviousInfluence(String observer) {
+    public Map<String, ReachableUser> getReachableUsers(String observer) {
         if (!observer.matches("[0-9a-fA-F]{64}")) {
             throw new IllegalArgumentException("observer pubkey must be 64 hex chars");
         }
 
         String influenceProp = "influence_" + observer;
 
-        String query = "MATCH (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
+        // One pruning BFS for distance, reach and previous Influence. Group on the node, not on
+        // its properties: grouping on `other.influence_*` returns wrong values on Neo4j 5.26.
+        String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
                 "WHERE other <> user " +
-                "RETURN DISTINCT other.pubkey AS pubkey, other." + influenceProp + " AS influence";
+                "WITH other, min(length(p)) AS hops " +
+                "RETURN other.pubkey AS pubkey, hops, other." + influenceProp + " AS influence";
 
-        Map<String, Double> result = new HashMap<>();
+        Map<String, ReachableUser> result = new HashMap<>();
 
         try (Session session = driver.session()) {
             List<Record> records = session.readTransaction(tx -> {
@@ -71,16 +38,12 @@ public class Neo4jHelper implements IGraphDB {
             });
 
             if (records != null && !records.isEmpty()) {
-                String observerNodeId = getNodeIdByPubkey(observer);
-                if (observerNodeId != null) {
-                    result.put(observer, getInfluenceForPubkey(observer, influenceProp));
+                result.put(observer, new ReachableUser(0, getInfluenceForPubkey(observer, influenceProp)));
 
-                    for (Record record : records) {
-                        String pubkey = record.get("pubkey").asString();
-                        Value infValue = record.get("influence");
-                        Double influence = infValue.isNull() ? null : infValue.asDouble();
-                        result.put(pubkey, influence);
-                    }
+                for (Record record : records) {
+                    Value infValue = record.get("influence");
+                    Double influence = infValue.isNull() ? null : infValue.asDouble();
+                    result.put(record.get("pubkey").asString(), new ReachableUser(record.get("hops").asInt(), influence));
                 }
             }
         }

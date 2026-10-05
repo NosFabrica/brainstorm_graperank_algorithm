@@ -2,6 +2,7 @@ package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.IRelationshipsCache;
+import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.rank.ScoreCard;
 
@@ -29,20 +30,15 @@ final class ObserverMuterSubjectFixture {
     private ObserverMuterSubjectFixture() {}
 
     /** Reachable-user graph: the Observer follows MUTER (1 hop); SUBJECT is only
-     * reached as a mute target, so it never appears at any hop. */
+     * reached as a mute target, so it is beyond the hop limit. */
     private static final class FakeGraphDB implements IGraphDB {
         @Override
-        public List<String> getUsersConnectedToObserver(String observer, Integer hopsLimit) {
-            return List.of(MUTER);
-        }
-
-        @Override
-        public Map<String, Double> getUsersConnectedToObserverWithPreviousInfluence(String observer) {
-            Map<String, Double> previous = new HashMap<>();
-            previous.put(OBSERVER, 1.0);
-            previous.put(MUTER, 0.0);
-            previous.put(SUBJECT, 0.0);
-            return previous;
+        public Map<String, ReachableUser> getReachableUsers(String observer) {
+            Map<String, ReachableUser> reachable = new HashMap<>();
+            reachable.put(OBSERVER, new ReachableUser(0, 1.0));
+            reachable.put(MUTER, new ReachableUser(1, 0.0));
+            reachable.put(SUBJECT, new ReachableUser(Constants.MAX_HOPS + 1, 0.0));
+            return reachable;
         }
     }
 

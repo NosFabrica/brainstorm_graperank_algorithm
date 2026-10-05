@@ -16,6 +16,8 @@ public class Constants {
 
     public static final double THRESHOLD_OF_LOOP_BREAK_GIVEN_MINIMUM_DELTA_INFLUENCE = 0.0001;
 
+    // Follow distances beyond this are published as UNREACHABLE_HOPS.
+    public static final int MAX_HOPS = 8;
     // "No follow path from the observer within the hop limit". Published as a
     // scorecard `hops` value; the server omits the TA's `hops` tag at it.
     public static final double UNREACHABLE_HOPS = 999;
