@@ -2,6 +2,7 @@ package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.IRelationshipsCache;
+import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.rank.ScoreCard;
 import org.junit.jupiter.api.Test;
@@ -60,17 +61,7 @@ class DesignatedKeysTest {
      * added regardless of the graph and must not turn that into a success. */
     @Test
     void doesNotMakeAnUnconnectedObserverSucceed() {
-        IGraphDB emptyGraph = new IGraphDB() {
-            @Override
-            public List<String> getUsersConnectedToObserver(String observer, Integer hopsLimit) {
-                return List.of();
-            }
-
-            @Override
-            public Map<String, Double> getUsersConnectedToObserverWithPreviousInfluence(String observer) {
-                return Map.of(OBSERVER, 1.0);
-            }
-        };
+        IGraphDB emptyGraph = observer -> Map.of(OBSERVER, new ReachableUser(0, 1.0));
         IRelationshipsCache noEdges = new IRelationshipsCache() {
             @Override
             public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {

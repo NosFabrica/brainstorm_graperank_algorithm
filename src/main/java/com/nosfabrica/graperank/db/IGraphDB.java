@@ -1,10 +1,8 @@
 package com.nosfabrica.graperank.db;
 
-import java.util.List;
 import java.util.Map;
 
 public interface IGraphDB {
-    List<String> getUsersConnectedToObserver(String observer, Integer hopsLimit);
-
-    Map<String, Double> getUsersConnectedToObserverWithPreviousInfluence(String observer);
+    /** Everyone the Observer reaches by follows, plus the Observer; empty if none. */
+    Map<String, ReachableUser> getReachableUsers(String observer);
 }
