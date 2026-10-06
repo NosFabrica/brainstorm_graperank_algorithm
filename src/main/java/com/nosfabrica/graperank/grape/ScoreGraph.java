@@ -79,8 +79,12 @@ final class ScoreGraph {
     int iterate(Csr ratings, GrapeRankParams params) {
         final int[] off = ratings.off;
         final int[] src = ratings.src;
-        final double[] ratingConfidence = ratings.confidence;
-        final double[] rating = ratings.rating;
+        final byte[] kind = ratings.kind;
+        final double[] ratingConfidence = {
+                params.followConfidence(), params.followConfidenceOfObserver(),
+                params.muteConfidence(), params.reportConfidence()};
+        final double[] rating = {
+                params.followRating(), params.followRating(), params.muteRating(), params.reportRating()};
         final double attenuation = params.attenuationFactor();
         final double rigor = params.rigor();
         int rounds = 0;
@@ -93,9 +97,9 @@ final class ScoreGraph {
                 double sumOfWeights = 0;
                 double sumOfWxr = 0;
                 for (int e = off[i], end = off[i + 1]; e < end; e++) {
-                    double weight = ratingConfidence[e] * influence[src[e]] * attenuation;
+                    double weight = ratingConfidence[kind[e]] * influence[src[e]] * attenuation;
                     sumOfWeights += weight;
-                    sumOfWxr += weight * rating[e];
+                    sumOfWxr += weight * rating[kind[e]];
                 }
 
                 double avgScore = (sumOfWeights != 0) ? sumOfWxr / sumOfWeights : 0;
@@ -117,17 +121,32 @@ final class ScoreGraph {
         }
     }
 
-    /** Per ratee, how many raters clear `cutoff` — raw Influence, strict `>`. */
-    double[] countTrustedRaters(Csr raters, double cutoff) {
-        double[] counts = new double[pubkeys.length];
-        for (int i = 0; i < pubkeys.length; i++) {
-            long count = 0;
-            for (int e = raters.off[i]; e < raters.off[i + 1]; e++) {
-                if (influence[raters.src[e]] > cutoff) count++;
+    /** Per ratee, how many followers / muters / reporters clear their preset cutoff — raw
+     * Influence, strict `>`. The Observer's own follows count as follows. */
+    void countTrustedRaters(Csr ratings, GrapeRankParams params) {
+        double[] cutoff = {
+                params.verifiedFollowersInfluenceCutoff(), params.verifiedFollowersInfluenceCutoff(),
+                params.verifiedMutersInfluenceCutoff(), params.verifiedReportersInfluenceCutoff()};
+        int n = pubkeys.length;
+        trustedFollowers = new double[n];
+        trustedMuters = new double[n];
+        trustedReporters = new double[n];
+        for (int i = 0; i < n; i++) {
+            long followers = 0, muters = 0, reporters = 0;
+            for (int e = ratings.off[i]; e < ratings.off[i + 1]; e++) {
+                byte k = ratings.kind[e];
+                if (influence[ratings.src[e]] > cutoff[k]) {
+                    switch (k) {
+                        case FOLLOW, OBSERVER_FOLLOW -> followers++;
+                        case MUTE -> muters++;
+                        default -> reporters++;
+                    }
+                }
             }
-            counts[i] = count;
+            trustedFollowers[i] = followers;
+            trustedMuters[i] = muters;
+            trustedReporters[i] = reporters;
         }
-        return counts;
     }
 
     /** Scorecards in id order, which is the String-keyed implementation's map order, so JSON is unchanged. */
@@ -148,19 +167,23 @@ final class ScoreGraph {
         return result;
     }
 
-    /** Compressed sparse rows: row `i`'s entries are `src[off[i] .. off[i + 1])`, with their
-     * `confidence` / `rating` at the same positions when the edges are weighted (else null). */
+    /** Edge kinds: index into the per-run confidence / rating / cutoff tables. */
+    static final byte FOLLOW = 0;
+    static final byte OBSERVER_FOLLOW = 1;
+    static final byte MUTE = 2;
+    static final byte REPORT = 3;
+
+    /** Compressed sparse rows: row `i`'s edges are `src[off[i] .. off[i + 1])`, with each edge's kind
+     * at the same position. */
     static final class Csr {
         final int[] off;
         final int[] src;
-        final double[] confidence;
-        final double[] rating;
+        final byte[] kind;
 
-        private Csr(int[] off, int[] src, double[] confidence, double[] rating) {
+        private Csr(int[] off, int[] src, byte[] kind) {
             this.off = off;
             this.src = src;
-            this.confidence = confidence;
-            this.rating = rating;
+            this.kind = kind;
         }
     }
 
@@ -169,31 +192,16 @@ final class ScoreGraph {
     static final class EdgeList {
         private int[] rows = new int[1024];
         private int[] cols = new int[1024];
-        private double[] confidences;
-        private double[] ratings;
+        private byte[] kinds = new byte[1024];
         private int size;
 
         private static final int MAX_CAPACITY = Integer.MAX_VALUE - 8;
 
-        EdgeList(boolean withWeights) {
-            if (withWeights) {
-                confidences = new double[1024];
-                ratings = new double[1024];
-            }
-        }
-
-        void add(int row, int col) {
-            grow();
-            rows[size] = row;
-            cols[size++] = col;
-        }
-
-        void add(int row, int col, double confidence, double rating) {
-            grow();
+        void add(int row, int col, byte kind) {
+            if (size == rows.length) grow();
             rows[size] = row;
             cols[size] = col;
-            confidences[size] = confidence;
-            ratings[size++] = rating;
+            kinds[size++] = kind;
         }
 
         int size() {
@@ -201,15 +209,11 @@ final class ScoreGraph {
         }
 
         private void grow() {
-            if (size < rows.length) return;
             int capacity = (int) Math.min(2L * rows.length, MAX_CAPACITY);
             if (capacity == size) throw new IllegalStateException("more than " + MAX_CAPACITY + " edges");
             rows = Arrays.copyOf(rows, capacity);
             cols = Arrays.copyOf(cols, capacity);
-            if (confidences != null) {
-                confidences = Arrays.copyOf(confidences, capacity);
-                ratings = Arrays.copyOf(ratings, capacity);
-            }
+            kinds = Arrays.copyOf(kinds, capacity);
         }
 
         /** Stable counting sort by row. */
@@ -220,19 +224,15 @@ final class ScoreGraph {
 
             int[] cursor = Arrays.copyOf(off, rowCount);
             int[] src = new int[size];
-            double[] sortedConfidences = confidences == null ? null : new double[size];
-            double[] sortedRatings = ratings == null ? null : new double[size];
+            byte[] kind = new byte[size];
             for (int e = 0; e < size; e++) {
                 int p = cursor[rows[e]]++;
                 src[p] = cols[e];
-                if (sortedConfidences != null) {
-                    sortedConfidences[p] = confidences[e];
-                    sortedRatings[p] = ratings[e];
-                }
+                kind[p] = kinds[e];
             }
             rows = cols = null;
-            confidences = ratings = null;
-            return new Csr(off, src, sortedConfidences, sortedRatings);
+            kinds = null;
+            return new Csr(off, src, kind);
         }
     }
 }
