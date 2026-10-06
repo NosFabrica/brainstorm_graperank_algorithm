@@ -22,3 +22,20 @@ On the Java side:
 - Wire into the algorithm.
 
 Missing required fields in the Redis payload throw at `Main.resolveParams`; the request is pushed back with `success: false` and the Python server marks it `FAILED`.
+
+## How a run is held in memory (`ScoreGraph`)
+
+A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and small:
+
+- **Int ids.** Each pubkey gets an index `0..n-1` once; everything after works on ints, not pubkey strings.
+- **SoA (struct of arrays).** Instead of one `ScoreCard` object per user, each field is its own array:
+  `influence[i]`, `confidence[i]`, `hops[i]`, … for user `i`. `ScoreCard`s are only built at the end for the JSON.
+- **CSR (compressed sparse rows).** The incoming ratings of user `i` sit in `src[off[i] .. off[i+1])`
+  (rater ids), with `ratingConfidence[]` / `rating[]` at the same positions. Followers, muters and
+  reporters (for the trusted counts) use the same layout.
+- **Pinned users** — the Observer and their designated (kind-10040) keys — are seeded once and never
+  recomputed (`pinned[i]`).
+
+The loop updates Influence in place, so the order users are visited in, and the order of each user's
+ratings (follows → mutes → reports), change the result. Keep both as they are, or
+`GrapeRankEquivalenceTest` fails.
