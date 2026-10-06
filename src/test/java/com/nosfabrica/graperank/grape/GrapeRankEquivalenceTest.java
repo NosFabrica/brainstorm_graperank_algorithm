@@ -111,8 +111,8 @@ class GrapeRankEquivalenceTest {
     })
     void matchesTheReferenceImplementationExactly(long seed, int users, int meanFollows, boolean connected)
             throws Exception {
+        Fixture f = fixture(seed, users, meanFollows, connected);
         for (GrapeRankParams params : List.of(Constants.DEFAULT_PARAMS, customParams())) {
-            Fixture f = fixture(seed, users, meanFollows, connected);
 
             GrapeRankResult expected = new ReferenceGrapeRank(f.graph(), f.cache())
                     .graperankAllSteps(f.observer(), params, f.designated());

@@ -4,6 +4,7 @@ import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,7 +18,6 @@ final class ScoreGraph {
     final String observer;
     final String[] pubkeys;
     final Map<String, Integer> idOf;
-    private final List<String> insertionOrder;
 
     final double[] hops;
     final double[] averageScore;
@@ -26,17 +26,12 @@ final class ScoreGraph {
     final double[] influence;
     final boolean[] pinned;
 
-    Csr ratings;
-    double[] ratingConfidence;
-    double[] rating;
-
     double[] trustedFollowers;
     double[] trustedReporters;
     double[] trustedMuters;
 
     ScoreGraph(String observer, List<String> relevantUsers, Map<String, Double> userDistanceMap) {
         this.observer = observer;
-        this.insertionOrder = relevantUsers;
         Map<String, Integer> ids = new HashMap<>();
         for (String user : relevantUsers) ids.put(user, 0);
         int n = ids.size();
@@ -81,9 +76,11 @@ final class ScoreGraph {
     }
 
     /** Sweep until no Influence moves by more than the loop-break threshold. Returns rounds. */
-    int iterate(GrapeRankParams params) {
+    int iterate(Csr ratings, GrapeRankParams params) {
         final int[] off = ratings.off;
         final int[] src = ratings.src;
+        final double[] ratingConfidence = ratings.confidence;
+        final double[] rating = ratings.rating;
         final double attenuation = params.attenuationFactor();
         final double rigor = params.rigor();
         int rounds = 0;
@@ -133,10 +130,10 @@ final class ScoreGraph {
         return counts;
     }
 
-    /** Scorecards keyed like the String-keyed implementation's map, so JSON order is unchanged. */
+    /** Scorecards in id order, which is the String-keyed implementation's map order, so JSON is unchanged. */
     Map<String, ScoreCard> toScorecards(double verifiedCutoff) {
-        ScoreCard[] cards = new ScoreCard[pubkeys.length];
-        for (int i = 0; i < cards.length; i++) {
+        Map<String, ScoreCard> result = new LinkedHashMap<>(pubkeys.length * 4 / 3 + 1);
+        for (int i = 0; i < pubkeys.length; i++) {
             ScoreCard card = new ScoreCard(observer, pubkeys[i], hops[i]);
             card.setAverageScore(averageScore[i]);
             card.setInput(input[i]);
@@ -146,31 +143,37 @@ final class ScoreGraph {
             card.setTrustedFollowers(trustedFollowers[i]);
             card.setTrustedReporters(trustedReporters[i]);
             card.setTrustedMuters(trustedMuters[i]);
-            cards[i] = card;
+            result.put(pubkeys[i], card);
         }
-        Map<String, ScoreCard> result = new HashMap<>();
-        for (String user : insertionOrder) result.put(user, cards[idOf.get(user)]);
         return result;
     }
 
-    /** Compressed sparse rows: row `i`'s entries are `src[off[i] .. off[i + 1])`. */
+    /** Compressed sparse rows: row `i`'s entries are `src[off[i] .. off[i + 1])`, with their
+     * `confidence` / `rating` at the same positions when the edges are weighted (else null). */
     static final class Csr {
         final int[] off;
         final int[] src;
+        final double[] confidence;
+        final double[] rating;
 
-        private Csr(int[] off, int[] src) {
+        private Csr(int[] off, int[] src, double[] confidence, double[] rating) {
             this.off = off;
             this.src = src;
+            this.confidence = confidence;
+            this.rating = rating;
         }
     }
 
-    /** Edges appended in arrival order; {@link #toCsr} groups them by row, keeping that order. */
+    /** Edges appended in arrival order; {@link #toCsr} groups them by row, keeping that order,
+     * and releases the buffers. */
     static final class EdgeList {
         private int[] rows = new int[1024];
         private int[] cols = new int[1024];
         private double[] confidences;
         private double[] ratings;
         private int size;
+
+        private static final int MAX_CAPACITY = Integer.MAX_VALUE - 8;
 
         EdgeList(boolean withWeights) {
             if (withWeights) {
@@ -199,7 +202,8 @@ final class ScoreGraph {
 
         private void grow() {
             if (size < rows.length) return;
-            int capacity = rows.length * 2;
+            int capacity = (int) Math.min(2L * rows.length, MAX_CAPACITY);
+            if (capacity == size) throw new IllegalStateException("more than " + MAX_CAPACITY + " edges");
             rows = Arrays.copyOf(rows, capacity);
             cols = Arrays.copyOf(cols, capacity);
             if (confidences != null) {
@@ -208,8 +212,8 @@ final class ScoreGraph {
             }
         }
 
-        /** Stable counting sort by row. Fills `graph`'s rating weights when this list carries them. */
-        Csr toCsr(int rowCount, ScoreGraph graph) {
+        /** Stable counting sort by row. */
+        Csr toCsr(int rowCount) {
             int[] off = new int[rowCount + 1];
             for (int e = 0; e < size; e++) off[rows[e] + 1]++;
             for (int i = 0; i < rowCount; i++) off[i + 1] += off[i];
@@ -226,11 +230,9 @@ final class ScoreGraph {
                     sortedRatings[p] = ratings[e];
                 }
             }
-            if (sortedConfidences != null) {
-                graph.ratingConfidence = sortedConfidences;
-                graph.rating = sortedRatings;
-            }
-            return new Csr(off, src);
+            rows = cols = null;
+            confidences = ratings = null;
+            return new Csr(off, src, sortedConfidences, sortedRatings);
         }
     }
 }
