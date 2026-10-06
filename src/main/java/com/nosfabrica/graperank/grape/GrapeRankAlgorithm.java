@@ -6,11 +6,9 @@ import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.exceptions.ErrorCode;
 import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
-import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Collection;
 import java.util.Map;
-import java.util.Collections;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,86 +24,6 @@ public class GrapeRankAlgorithm {
         this.relationshipsCache = relationshipsCache;
     }
 
-    public static GrapeRankAlgorithmResult graperankAlgorithm(
-            Map<String, List<GrapeRankInput>> graperankInputs,
-            Map<String, ScoreCard> graperankScorecards,
-            GrapeRankParams params) {
-        return graperankAlgorithm(graperankInputs, graperankScorecards, params, Set.of());
-    }
-
-    /** `pinnedUsers` keep the Influence their scorecard was seeded with — like the
-     * Observer, their scorecard is never recomputed from ratings. */
-    public static GrapeRankAlgorithmResult graperankAlgorithm(
-            Map<String, List<GrapeRankInput>> graperankInputs,
-            Map<String, ScoreCard> graperankScorecards,
-            GrapeRankParams params,
-            Set<String> pinnedUsers) {
-
-        int rounds = 0;
-        boolean shouldBreak;
-
-        while (true) {
-            shouldBreak = true;
-
-            for (Map.Entry<String, ScoreCard> entry : graperankScorecards.entrySet()) {
-                ScoreCard scorecard = entry.getValue();
-
-                if (scorecard.getObserver().equals(scorecard.getObservee())
-                        || pinnedUsers.contains(scorecard.getObservee())) {
-                    continue;
-                }
-
-                // handling empty case. to investigate later
-                List<GrapeRankInput> relevantDataPoints = graperankInputs.getOrDefault(scorecard.getObservee(),List.of());
-
-                double sumOfWeights = 0;
-                double sumOfWxr = 0;
-
-                for (GrapeRankInput relevantDataPoint : relevantDataPoints) {
-                    double infOfRater = graperankScorecards.get(relevantDataPoint.getRater()).getInfluence();
-                    double weight = relevantDataPoint.getConfidence()
-                            * infOfRater
-                            * params.attenuationFactor();
-
-                    double wxr = weight * relevantDataPoint.getRating();
-
-                    sumOfWeights += weight;
-                    sumOfWxr += wxr;
-                }
-
-                double avgScore = (sumOfWeights != 0) ? sumOfWxr / sumOfWeights : 0;
-                scorecard.setAverageScore(avgScore);
-                scorecard.setInput(sumOfWeights);
-
-                // Convert input to confidence (you need to define the logic for this)
-                scorecard.setConfidence(convertInputToConfidence(scorecard.getInput(), params.rigor()));
-
-                double computedInfluence = Math.max(scorecard.getAverageScore() * scorecard.getConfidence(), 0);
-                double deltaInfluence = Math.abs(computedInfluence - scorecard.getInfluence());
-
-                if (deltaInfluence > Constants.THRESHOLD_OF_LOOP_BREAK_GIVEN_MINIMUM_DELTA_INFLUENCE) {
-                    shouldBreak = false;
-                }
-
-                scorecard.setInfluence(computedInfluence);
-            }
-
-            rounds++;
-            System.out.println("NUMBER OF ROUNDS: " + rounds);
-
-            if (shouldBreak) {
-                break;
-            }
-        }
-
-        for (ScoreCard scorecard : graperankScorecards.values()) {
-            scorecard.setVerified(scorecard.getInfluence() > params.verifiedFollowersInfluenceCutoff());
-        }
-
-        return new GrapeRankAlgorithmResult(graperankScorecards, rounds);
-
-    }
-
     public static double convertInputToConfidence(double input, double rigor) {
         double rigority = -Math.log(rigor);
         double fooB = -input * rigority;
@@ -114,83 +32,41 @@ public class GrapeRankAlgorithm {
         return confidence;
     }
 
-    public List<GrapeRankInput> getGrapeRankInputsOfRelationships(
-            List<RelationshipInfo> outgoingRelationships,
-            String observer,
+    /** Append each rating whose rater is a relevant user: rating and confidence by relationship,
+     * the Observer's own follows at the Observer's follow confidence. Returns how many it kept. */
+    private static int addRatings(
+            List<RelationshipInfo> relationships,
+            ScoreGraph graph,
+            ScoreGraph.EdgeList ratings,
             GrapeRankParams params) {
-        List<GrapeRankInput> graperankInputs = new ArrayList<>();
+        int added = 0;
+        for (RelationshipInfo rel : relationships) {
+            Integer rater = graph.idOf.get(rel.getSource());
+            Integer ratee = graph.idOf.get(rel.getTarget());
+            if (rater == null || ratee == null) continue;
 
-        for (RelationshipInfo outgoingRelationshipObj : outgoingRelationships) {
-            String outgoingRelationship = outgoingRelationshipObj.getRelationship();
-            String outgoingRelationshipTarget = outgoingRelationshipObj.getTarget();
-            String outgoingRelationshipSource = outgoingRelationshipObj.getSource();
-
-            double rating = 0;
-
-            switch (outgoingRelationship) {
-                case "FOLLOWS":
-                    rating = params.followRating();
-                    break;
-                case "MUTES":
-                    rating = params.muteRating();
-                    break;
-                case "REPORTS":
-                    rating = params.reportRating();
-                    break;
-                default:
-                    throw new UnknownRelationshipException(outgoingRelationship);
+            switch (rel.getRelationship()) {
+                case "FOLLOWS" -> ratings.add(ratee, rater,
+                        rel.getSource().equals(graph.observer)
+                                ? params.followConfidenceOfObserver()
+                                : params.followConfidence(),
+                        params.followRating());
+                case "MUTES" -> ratings.add(ratee, rater, params.muteConfidence(), params.muteRating());
+                case "REPORTS" -> ratings.add(ratee, rater, params.reportConfidence(), params.reportRating());
+                default -> throw new UnknownRelationshipException(rel.getRelationship());
             }
-
-            double confidence = 0;
-
-            switch (outgoingRelationship) {
-                case "FOLLOWS":
-                    if (outgoingRelationshipSource.equals(observer)) {
-                        confidence = params.followConfidenceOfObserver();
-                    } else {
-                        confidence = params.followConfidence();
-                    }
-                    break;
-                case "MUTES":
-                    confidence = params.muteConfidence();
-                    break;
-                case "REPORTS":
-                    confidence = params.reportConfidence();
-                    break;
-                default:
-                    throw new UnknownRelationshipException(outgoingRelationship);
-            }
-
-            GrapeRankInput newInput = new GrapeRankInput(outgoingRelationshipSource, outgoingRelationshipTarget, rating,
-                    confidence);
-            graperankInputs.add(newInput);
+            added++;
         }
-
-        return graperankInputs;
+        return added;
     }
 
-    public Map<String, ScoreCard> initGrapeRankScorecards(List<String> relevantUsers, String observer, Map<String, Double> userDistanceMap) {
-        Map<String, ScoreCard> result = new HashMap<>();
-
-        for (String user : relevantUsers) {
-            if (!user.equals(observer)) {
-                Double distance = userDistanceMap.getOrDefault(user, Constants.UNREACHABLE_HOPS);
-                
-
-                result.put(user, new ScoreCard(observer, user, distance));
-            } else {
-
-                result.put(user, new ScoreCard(
-                        observer,
-                        user,
-                        1.0,
-                        Double.POSITIVE_INFINITY,
-                        1.0,
-                        1.0));
-            }
+    /** Raters that have a score, by ratee — the only ones a trusted count can include. */
+    private static void addRaters(List<RelationshipInfo> relationships, ScoreGraph graph, ScoreGraph.EdgeList raters) {
+        for (RelationshipInfo rel : relationships) {
+            Integer rater = graph.idOf.get(rel.getSource());
+            Integer ratee = graph.idOf.get(rel.getTarget());
+            if (rater != null && ratee != null) raters.add(ratee, rater);
         }
-
-        return result;
     }
 
     /** Pubkeys the Observer designated in their kind-10040 (the keys they trust to
@@ -205,33 +81,6 @@ public class GrapeRankAlgorithm {
             }
         }
         return designated;
-    }
-
-    /** Seed each designated key's scorecard at the fixed designated Influence. */
-    static void pinDesignatedScorecards(Map<String, ScoreCard> scorecards, Set<String> designated) {
-        for (String pubkey : designated) {
-            ScoreCard scorecard = scorecards.get(pubkey);
-            scorecard.setAverageScore(Constants.DESIGNATED_KEY_INFLUENCE);
-            scorecard.setInput(Double.POSITIVE_INFINITY);
-            scorecard.setConfidence(1.0);
-            scorecard.setInfluence(Constants.DESIGNATED_KEY_INFLUENCE);
-        }
-    }
-
-    /** How many of `ratee`'s raters clear `cutoff` — raw Influence, strict `>`.
-     * The one rule behind the trusted follower / reporter / muter counts, which
-     * differ only in which reverse-set and which preset cutoff they read. */
-    private static double countTrustedRaters(
-            Map<String, List<String>> ratersByRatee,
-            String ratee,
-            Map<String, ScoreCard> scorecards,
-            double cutoff) {
-        return ratersByRatee.getOrDefault(ratee, Collections.emptyList()).stream()
-                .filter(rater -> {
-                    ScoreCard raterScoreCard = scorecards.get(rater);
-                    return raterScoreCard != null && raterScoreCard.getInfluence() > cutoff;
-                })
-                .count();
     }
 
     private static final int BATCH_SIZE = 1000;
@@ -284,15 +133,19 @@ public class GrapeRankAlgorithm {
         int numOfIts = (int) Math.round((double) relevantUsers.size() / BATCH_SIZE);
         System.out.println("How many Neo4j iterations: " + numOfIts);
 
-        Map<String, List<GrapeRankInput>> graperankInputs = new HashMap<>();
+        long initStartTime = System.currentTimeMillis();
+        ScoreGraph graph = new ScoreGraph(observer, relevantUsers, userDistanceMap);
+        for (String pubkey : designatedUsers) {
+            graph.pin(graph.idOf.get(pubkey));
+        }
+        int n = graph.size();
+        System.out.println("TIMING scorecard init took "
+                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
 
-        Map<String, List<String>> followersByUser = new HashMap<>();
-
-        Map<String, List<String>> mutersByUser = new HashMap<>();
-
-        Map<String, List<String>> reportersByUser = new HashMap<>();
-
-        Set<String> relevantUsersSet = new HashSet<>(relevantUsers);
+        ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList(true);
+        ScoreGraph.EdgeList followers = new ScoreGraph.EdgeList(false);
+        ScoreGraph.EdgeList muters = new ScoreGraph.EdgeList(false);
+        ScoreGraph.EdgeList reporters = new ScoreGraph.EdgeList(false);
 
         long gatherStartTime = System.currentTimeMillis();
         long redisFetchMillis = 0;
@@ -316,62 +169,22 @@ public class GrapeRankAlgorithm {
             System.out.println(
                     iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
 
-            // Raters must be in relevantUsers so every GrapeRankInput has a scorecard entry in graperankAlgorithm.
-            List<RelationshipInfo> ratingsForBatch = new ArrayList<>(
-                    incomingFollowRelationships.size()
-                            + incomingMuteRelationships.size()
-                            + incomingReportRelationships.size());
-            for (RelationshipInfo rel : incomingFollowRelationships) {
-                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
-            }
-            for (RelationshipInfo rel : incomingMuteRelationships) {
-                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
-            }
-            for (RelationshipInfo rel : incomingReportRelationships) {
-                if (relevantUsersSet.contains(rel.getSource())) ratingsForBatch.add(rel);
-            }
+            // Per ratee the sweep sums follows, then mutes, then reports; the order is part of the result.
+            edgeCount += addRatings(incomingFollowRelationships, graph, ratings, params);
+            edgeCount += addRatings(incomingMuteRelationships, graph, ratings, params);
+            edgeCount += addRatings(incomingReportRelationships, graph, ratings, params);
 
-            List<GrapeRankInput> graperankInputsOfUser = getGrapeRankInputsOfRelationships(
-                   ratingsForBatch, observer,params);
-
-
-            edgeCount += graperankInputsOfUser.size();
-            for (GrapeRankInput grprIn : graperankInputsOfUser) {
-                graperankInputs.computeIfAbsent(grprIn.getRatee(), k -> new ArrayList<>()).add(grprIn);
-            }
-
-            for (RelationshipInfo rel : incomingFollowRelationships) {
-
-                String followedUser = rel.getTarget(); 
-                String follower = rel.getSource();     
-
-                followersByUser
-                    .computeIfAbsent(followedUser, k -> new ArrayList<>())
-                    .add(follower);
-            }
-
-            for (RelationshipInfo rel : incomingMuteRelationships) {
-
-                String mutedUser = rel.getTarget();
-                String muter = rel.getSource();
-
-                mutersByUser
-                    .computeIfAbsent(mutedUser, k -> new ArrayList<>())
-                    .add(muter);
-            }
-
-            for (RelationshipInfo rel : incomingReportRelationships) {
-
-                String reportedUser = rel.getTarget();
-                String reporter = rel.getSource();     
-
-                reportersByUser
-                    .computeIfAbsent(reportedUser, k -> new ArrayList<>())
-                    .add(reporter);
-            }
+            addRaters(incomingFollowRelationships, graph, followers);
+            addRaters(incomingMuteRelationships, graph, muters);
+            addRaters(incomingReportRelationships, graph, reporters);
 
             iteration++;
         }
+
+        graph.ratings = ratings.toCsr(n, graph);
+        ScoreGraph.Csr followersByUser = followers.toCsr(n, graph);
+        ScoreGraph.Csr mutersByUser = muters.toCsr(n, graph);
+        ScoreGraph.Csr reportersByUser = reporters.toCsr(n, graph);
 
         long gatherMillis = System.currentTimeMillis() - gatherStartTime;
         System.out.println("TIMING relationship gather took " + gatherMillis / 1000.0
@@ -379,33 +192,17 @@ public class GrapeRankAlgorithm {
                 + "s, build " + (gatherMillis - redisFetchMillis) / 1000.0
                 + "s, " + edgeCount + " edges)");
 
-        long initStartTime = System.currentTimeMillis();
-        Map<String, ScoreCard> scorecards = initGrapeRankScorecards(relevantUsers, observer,userDistanceMap);
-        pinDesignatedScorecards(scorecards, designatedUsers);
-        System.out.println("TIMING scorecard init took "
-                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
-
         long algoStartTime = System.currentTimeMillis();
-        GrapeRankAlgorithmResult algorithmResult = graperankAlgorithm(graperankInputs, scorecards, params, designatedUsers);
+        int rounds = graph.iterate(params);
         long algoEndTime = System.currentTimeMillis();
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 
 
         System.out.println("Getting trusted followers for each pubkey...");
         long trustedStartTime = System.currentTimeMillis();
-        Map<String, ScoreCard> finalScorecards = algorithmResult.getScorecards();
-
-        for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
-            String userPubkey = entry.getKey();
-            ScoreCard scoreCard = entry.getValue();
-
-            scoreCard.setTrustedFollowers(countTrustedRaters(
-                    followersByUser, userPubkey, finalScorecards, params.verifiedFollowersInfluenceCutoff()));
-            scoreCard.setTrustedReporters(countTrustedRaters(
-                    reportersByUser, userPubkey, finalScorecards, params.verifiedReportersInfluenceCutoff()));
-            scoreCard.setTrustedMuters(countTrustedRaters(
-                    mutersByUser, userPubkey, finalScorecards, params.verifiedMutersInfluenceCutoff()));
-        }
+        graph.trustedFollowers = graph.countTrustedRaters(followersByUser, params.verifiedFollowersInfluenceCutoff());
+        graph.trustedReporters = graph.countTrustedRaters(reportersByUser, params.verifiedReportersInfluenceCutoff());
+        graph.trustedMuters = graph.countTrustedRaters(mutersByUser, params.verifiedMutersInfluenceCutoff());
 
         System.out.println("TIMING trusted follower/reporter counts took "
                 + (System.currentTimeMillis() - trustedStartTime) / 1000.0 + " seconds");
@@ -415,9 +212,9 @@ public class GrapeRankAlgorithm {
         List<String> droppedBelowCutoffPubkeys = new ArrayList<>();
         double cutoff = 0.02;
 
-        for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
-            String pubkey = entry.getKey();
-            double newScore = entry.getValue().getInfluence();
+        for (int i = 0; i < n; i++) {
+            String pubkey = graph.pubkeys[i];
+            double newScore = graph.influence[i];
             double newRounded = Math.round(newScore * 100.0) / 100.0;
 
             Double prev = previousInfluence.get(pubkey);
@@ -453,8 +250,8 @@ public class GrapeRankAlgorithm {
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
 
         return new GrapeRankResult(
-                algorithmResult.getScorecards(),
-                algorithmResult.getRounds(),
+                graph.toScorecards(params.verifiedFollowersInfluenceCutoff()),
+                rounds,
                 finalTime / 1000.0,
                 success,
                 changedScorePubkeys,
