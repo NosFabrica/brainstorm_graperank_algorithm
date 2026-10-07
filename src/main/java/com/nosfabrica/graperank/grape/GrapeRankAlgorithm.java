@@ -2,6 +2,7 @@ package com.nosfabrica.graperank.grape;
 
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.IRelationshipsCache;
+import com.nosfabrica.graperank.db.IncomingRelationships;
 import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.exceptions.ErrorCode;
@@ -9,12 +10,20 @@ import com.nosfabrica.graperank.exceptions.UnknownRelationshipException;
 import com.nosfabrica.graperank.rank.ScoreCard;
 
 import java.util.Collection;
+import java.util.Deque;
 import java.util.Map;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class GrapeRankAlgorithm {
     private final IGraphDB db;
@@ -71,6 +80,30 @@ public class GrapeRankAlgorithm {
     }
 
     private static final int BATCH_SIZE = 1000;
+    private record TimedFetch(IncomingRelationships incoming, long fetchMillis) {}
+
+    private static <T> T await(Future<T> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while fetching relationships", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtime) throw runtime;
+            if (cause instanceof Error error) throw error;
+            throw new IllegalStateException(cause);
+        }
+    }
+
+    private static ThreadFactory daemonThreads() {
+        AtomicInteger count = new AtomicInteger();
+        return runnable -> {
+            Thread thread = new Thread(runnable, "relationship-fetch-" + count.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
 
     public static <T> List<List<T>> chunked(List<T> seq, int size) {
         List<List<T>> chunks = new ArrayList<>();
@@ -132,41 +165,48 @@ public class GrapeRankAlgorithm {
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 
         long gatherStartTime = System.currentTimeMillis();
-        long redisFetchMillis = 0;
+        long fetchMillis = 0;
+        long waitMillis = 0;
         long edgeCount = 0;
-        int iteration = 0;
-        for (List<String> usersBatch : chunked(relevantUsers, BATCH_SIZE)) {
+        // Each ratee is in exactly one batch, so batch order doesn't affect the CSR rows.
+        int parallelism = relationshipsCache.maxConcurrentFetches();
+        List<List<String>> batches = chunked(relevantUsers, BATCH_SIZE);
+        ExecutorService fetchers = Executors.newFixedThreadPool(parallelism, daemonThreads());
+        try {
+            Deque<Future<TimedFetch>> inFlight = new ArrayDeque<>();
+            int next = 0;
+            for (int iteration = 0; iteration < batches.size(); iteration++) {
+                while (next < batches.size() && inFlight.size() < parallelism) {
+                    List<String> batch = batches.get(next++);
+                    inFlight.add(fetchers.submit(() -> {
+                        long start = System.currentTimeMillis();
+                        IncomingRelationships fetched = relationshipsCache.getIncomingBulk(batch);
+                        return new TimedFetch(fetched, System.currentTimeMillis() - start);
+                    }));
+                }
 
-            long batchStartTime = System.currentTimeMillis();
-            List<RelationshipInfo> incomingFollowRelationships = relationshipsCache.getIncomingFollowsBulk(
-                    usersBatch);
+                long waitStart = System.currentTimeMillis();
+                TimedFetch timed = await(inFlight.removeFirst());
+                waitMillis += System.currentTimeMillis() - waitStart;
+                fetchMillis += timed.fetchMillis();
+                IncomingRelationships incoming = timed.incoming();
 
-            List<RelationshipInfo> incomingMuteRelationships = relationshipsCache.getIncomingMutesBulk(
-                    usersBatch);
-
-            List<RelationshipInfo> incomingReportRelationships = relationshipsCache.getIncomingReportsBulk(
-                    usersBatch);
-
-
-            long batchEndTime = System.currentTimeMillis();
-            redisFetchMillis += batchEndTime - batchStartTime;
-            System.out.println(
-                    iteration + " :: Getting relationships batched took " + (batchEndTime - batchStartTime) / 1000.0 + " seconds");
-
-            // Per ratee the sweep sums follows, then mutes, then reports; the order is part of the result.
-            edgeCount += addRatings(incomingFollowRelationships, graph, ratings);
-            edgeCount += addRatings(incomingMuteRelationships, graph, ratings);
-            edgeCount += addRatings(incomingReportRelationships, graph, ratings);
-
-            iteration++;
+                // Per ratee the sweep sums follows, then mutes, then reports; the order is part of the result.
+                edgeCount += addRatings(incoming.follows(), graph, ratings);
+                edgeCount += addRatings(incoming.mutes(), graph, ratings);
+                edgeCount += addRatings(incoming.reports(), graph, ratings);
+            }
+        } finally {
+            fetchers.shutdownNow();
         }
 
         ScoreGraph.Csr ratingsByUser = ratings.toCsr(n);
 
         long gatherMillis = System.currentTimeMillis() - gatherStartTime;
         System.out.println("TIMING relationship gather took " + gatherMillis / 1000.0
-                + " seconds (redis " + redisFetchMillis / 1000.0
-                + "s, build " + (gatherMillis - redisFetchMillis) / 1000.0
+                + " seconds (fetch " + fetchMillis / 1000.0
+                + "s summed over " + parallelism + " threads, waited " + waitMillis / 1000.0
+                + "s, build " + (gatherMillis - waitMillis) / 1000.0
                 + "s, " + edgeCount + " edges)");
 
         long algoStartTime = System.currentTimeMillis();
