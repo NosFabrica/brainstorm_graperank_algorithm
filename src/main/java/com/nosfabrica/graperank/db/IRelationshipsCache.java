@@ -11,7 +11,12 @@ public interface IRelationshipsCache {
 
     List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys);
 
-    /** All three for one batch. Must be safe to call from several threads at once. */
+    /** How many batches the gather may fetch at once. */
+    default int maxConcurrentFetches() {
+        return 4;
+    }
+
+    /** All three for one batch. Called from up to {@link #maxConcurrentFetches()} threads at once. */
     default IncomingRelationships getIncomingBulk(List<String> pubkeys) {
         return new IncomingRelationships(
                 getIncomingFollowsBulk(pubkeys),

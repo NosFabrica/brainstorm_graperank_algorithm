@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class GrapeRankAlgorithm {
     private final IGraphDB db;
@@ -79,9 +80,6 @@ public class GrapeRankAlgorithm {
     }
 
     private static final int BATCH_SIZE = 1000;
-    /** Batches fetched at once; also the Redis pool size (see `Main`). */
-    public static final int GATHER_PARALLELISM = 4;
-
     private record TimedFetch(IncomingRelationships incoming, long fetchMillis) {}
 
     private static <T> T await(Future<T> future) {
@@ -93,13 +91,15 @@ public class GrapeRankAlgorithm {
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException runtime) throw runtime;
+            if (cause instanceof Error error) throw error;
             throw new IllegalStateException(cause);
         }
     }
 
     private static ThreadFactory daemonThreads() {
+        AtomicInteger count = new AtomicInteger();
         return runnable -> {
-            Thread thread = new Thread(runnable, "relationship-fetch");
+            Thread thread = new Thread(runnable, "relationship-fetch-" + count.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         };
@@ -165,18 +165,18 @@ public class GrapeRankAlgorithm {
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 
         long gatherStartTime = System.currentTimeMillis();
-        long redisFetchMillis = 0;
+        long fetchMillis = 0;
         long waitMillis = 0;
         long edgeCount = 0;
-        // Up to GATHER_PARALLELISM batches in flight. Each ratee is in exactly one batch and the CSR
-        // keeps per-ratee order, so the order batches are consumed in doesn't change the result.
+        // Each ratee is in exactly one batch, so batch order doesn't affect the CSR rows.
+        int parallelism = relationshipsCache.maxConcurrentFetches();
         List<List<String>> batches = chunked(relevantUsers, BATCH_SIZE);
-        ExecutorService fetchers = Executors.newFixedThreadPool(GATHER_PARALLELISM, daemonThreads());
+        ExecutorService fetchers = Executors.newFixedThreadPool(parallelism, daemonThreads());
         try {
             Deque<Future<TimedFetch>> inFlight = new ArrayDeque<>();
             int next = 0;
             for (int iteration = 0; iteration < batches.size(); iteration++) {
-                while (next < batches.size() && inFlight.size() < GATHER_PARALLELISM) {
+                while (next < batches.size() && inFlight.size() < parallelism) {
                     List<String> batch = batches.get(next++);
                     inFlight.add(fetchers.submit(() -> {
                         long start = System.currentTimeMillis();
@@ -188,7 +188,7 @@ public class GrapeRankAlgorithm {
                 long waitStart = System.currentTimeMillis();
                 TimedFetch timed = await(inFlight.removeFirst());
                 waitMillis += System.currentTimeMillis() - waitStart;
-                redisFetchMillis += timed.fetchMillis();
+                fetchMillis += timed.fetchMillis();
                 IncomingRelationships incoming = timed.incoming();
 
                 // Per ratee the sweep sums follows, then mutes, then reports; the order is part of the result.
@@ -204,8 +204,8 @@ public class GrapeRankAlgorithm {
 
         long gatherMillis = System.currentTimeMillis() - gatherStartTime;
         System.out.println("TIMING relationship gather took " + gatherMillis / 1000.0
-                + " seconds (redis " + redisFetchMillis / 1000.0
-                + "s summed over " + GATHER_PARALLELISM + " connections, waited " + waitMillis / 1000.0
+                + " seconds (fetch " + fetchMillis / 1000.0
+                + "s summed over " + parallelism + " threads, waited " + waitMillis / 1000.0
                 + "s, build " + (gatherMillis - waitMillis) / 1000.0
                 + "s, " + edgeCount + " edges)");
 

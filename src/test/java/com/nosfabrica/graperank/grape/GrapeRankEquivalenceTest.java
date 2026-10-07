@@ -12,12 +12,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** The SoA implementation must reproduce {@link ReferenceGrapeRank} exactly: every scorecard
@@ -136,79 +139,97 @@ class GrapeRankEquivalenceTest {
         }
     }
 
-    /** Batches complete out of order (random 0–15 ms per batch, 6 batches fetched in parallel);
-     * the result must not depend on fetch timing. */
+    /** Within each window of in-flight fetches the earliest-started batch sleeps longest, so batches
+     * finish out of the order they started in; the result must still match the reference.
+     * 6,000 reachable users + 1 unreachable designated key = 7 batches, 4 fetched at once. */
     @Test
     void matchesTheReferenceWhenBatchesCompleteOutOfOrder() throws Exception {
         Fixture f = fixture(5, 6000, 8, true);
-        Random delays = new Random(11);
-        IRelationshipsCache slow = new IRelationshipsCache() {
-            @Override
-            public List<RelationshipInfo> getIncomingFollowsBulk(List<String> batch) {
-                return f.cache().getIncomingFollowsBulk(batch);
-            }
-
-            @Override
-            public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
-                return f.cache().getIncomingMutesBulk(batch);
-            }
-
-            @Override
-            public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
-                return f.cache().getIncomingReportsBulk(batch);
-            }
-
+        AtomicInteger started = new AtomicInteger();
+        List<Integer> finished = Collections.synchronizedList(new ArrayList<>());
+        IRelationshipsCache slow = new DelegatingCache(f.cache()) {
             @Override
             public IncomingRelationships getIncomingBulk(List<String> batch) {
-                int delay;
-                synchronized (delays) {
-                    delay = delays.nextInt(16);
-                }
+                int call = started.getAndIncrement();
                 try {
-                    Thread.sleep(delay);
+                    Thread.sleep(10L * (3 - call % 4));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                return IRelationshipsCache.super.getIncomingBulk(batch);
+                IncomingRelationships incoming = super.getIncomingBulk(batch);
+                finished.add(call);
+                return incoming;
             }
         };
 
         GrapeRankResult expected = new ReferenceGrapeRank(f.graph(), f.cache())
                 .graperankAllSteps(f.observer(), Constants.DEFAULT_PARAMS, f.designated());
-        for (int run = 0; run < 3; run++) {
-            GrapeRankResult actual = new GrapeRankAlgorithm(f.graph(), slow)
-                    .graperankAllSteps(f.observer(), Constants.DEFAULT_PARAMS, f.designated());
-            assertEquals(MAPPER.writeValueAsString(expected.getScorecards()),
-                    MAPPER.writeValueAsString(actual.getScorecards()));
-            assertEquals(expected.getRounds(), actual.getRounds());
-            assertEquals(expected.getChangedScorePubkeys(), actual.getChangedScorePubkeys());
-        }
+        GrapeRankResult actual = new GrapeRankAlgorithm(f.graph(), slow)
+                .graperankAllSteps(f.observer(), Constants.DEFAULT_PARAMS, f.designated());
+
+        List<Integer> inOrder = new ArrayList<>(finished);
+        Collections.sort(inOrder);
+        assertNotEquals(inOrder, finished, "batches should have finished out of order");
+        assertEquals(MAPPER.writeValueAsString(expected.getScorecards()),
+                MAPPER.writeValueAsString(actual.getScorecards()));
+        assertEquals(expected.getRounds(), actual.getRounds());
+        assertEquals(expected.getChangedScorePubkeys(), actual.getChangedScorePubkeys());
+        assertEquals(expected.getDroppedBelowCutoffPubkeys(), actual.getDroppedBelowCutoffPubkeys());
     }
 
     @Test
     void aFailedFetchFailsTheRun() {
         Fixture f = fixture(6, 3000, 5, true);
-        IRelationshipsCache failing = new IRelationshipsCache() {
+        IRelationshipsCache failing = new DelegatingCache(f.cache()) {
             @Override
             public List<RelationshipInfo> getIncomingFollowsBulk(List<String> batch) {
-                if (batch.contains(f.observer())) return f.cache().getIncomingFollowsBulk(batch);
                 throw new IllegalStateException("redis down");
-            }
-
-            @Override
-            public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
-                return f.cache().getIncomingMutesBulk(batch);
-            }
-
-            @Override
-            public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
-                return f.cache().getIncomingReportsBulk(batch);
             }
         };
 
         IllegalStateException e = assertThrows(IllegalStateException.class, () ->
                 new GrapeRankAlgorithm(f.graph(), failing).graperankAllSteps(f.observer()));
         assertEquals("redis down", e.getMessage());
+    }
+
+    /** An Error on a fetch thread (e.g. OutOfMemoryError) must reach the caller unwrapped. */
+    @Test
+    void anErrorOnAFetchThreadIsNotWrapped() {
+        Fixture f = fixture(7, 3000, 5, true);
+        IRelationshipsCache failing = new DelegatingCache(f.cache()) {
+            @Override
+            public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
+                throw new FetchError();
+            }
+        };
+
+        assertThrows(FetchError.class, () ->
+                new GrapeRankAlgorithm(f.graph(), failing).graperankAllSteps(f.observer()));
+    }
+
+    private static final class FetchError extends Error {}
+
+    private static class DelegatingCache implements IRelationshipsCache {
+        private final IRelationshipsCache delegate;
+
+        DelegatingCache(IRelationshipsCache delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public List<RelationshipInfo> getIncomingFollowsBulk(List<String> batch) {
+            return delegate.getIncomingFollowsBulk(batch);
+        }
+
+        @Override
+        public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
+            return delegate.getIncomingMutesBulk(batch);
+        }
+
+        @Override
+        public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
+            return delegate.getIncomingReportsBulk(batch);
+        }
     }
 
     // JSON prints doubles shortest-round-trip, so it is exact already; this also covers -0.0 vs 0.0.

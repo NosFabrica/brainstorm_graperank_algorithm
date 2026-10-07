@@ -15,7 +15,7 @@ public class MainTest {
         GrapeRankAlgorithm helper = new GrapeRankAlgorithm(
             // TODO: Mock the DB
             new Neo4jHelper("neo4j://host.docker.internal:7687","neo4j","password"),
-            new RedisRelationshipsHelper("host.docker.internal", 6379, GrapeRankAlgorithm.GATHER_PARALLELISM)
+            new RedisRelationshipsHelper("host.docker.internal", 6379)
         );
 
         GrapeRankResult result = helper.graperankAllSteps(observer);

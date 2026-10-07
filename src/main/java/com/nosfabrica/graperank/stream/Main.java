@@ -44,8 +44,7 @@ public class Main {
 
     // One driver per process: a driver per message leaked its pool and native buffers.
     private static final Neo4jHelper neo4jHelper = new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD);
-    private static final RedisRelationshipsHelper relationshipsCache = new RedisRelationshipsHelper(
-            REDIS_HOST, REDIS_PORT, GrapeRankAlgorithm.GATHER_PARALLELISM);
+    private static final RedisRelationshipsHelper relationshipsCache = new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT);
 
     public static void main(String[] args) {
         Runtime.getRuntime().addShutdownHook(new Thread(neo4jHelper::close));

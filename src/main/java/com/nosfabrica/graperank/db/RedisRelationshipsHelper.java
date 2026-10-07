@@ -8,23 +8,36 @@ import redis.clients.jedis.Response;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 public class RedisRelationshipsHelper implements IRelationshipsCache, AutoCloseable {
 
-    private static final String FOLLOWED_BY_KEY_PREFIX = "followed_by:";
-    private static final String MUTED_BY_KEY_PREFIX = "muted_by:";
-    private static final String REPORTED_BY_KEY_PREFIX = "reported_by:";
+    /** One pooled connection per concurrent batch. */
+    private static final int CONNECTIONS = 4;
+
+    private enum ReverseSet {
+        FOLLOWED_BY("followed_by:", "FOLLOWS"),
+        MUTED_BY("muted_by:", "MUTES"),
+        REPORTED_BY("reported_by:", "REPORTS");
+
+        final String keyPrefix;
+        final String relationship;
+
+        ReverseSet(String keyPrefix, String relationship) {
+            this.keyPrefix = keyPrefix;
+            this.relationship = relationship;
+        }
+    }
 
     private final JedisPool pool;
 
-    /** `connections`: the most batches fetched at once; size it to the gather's parallelism. */
-    public RedisRelationshipsHelper(String host, int port, int connections) {
+    public RedisRelationshipsHelper(String host, int port) {
         JedisPoolConfig config = new JedisPoolConfig();
-        config.setMaxTotal(connections);
-        config.setMaxIdle(connections);
+        config.setMaxTotal(CONNECTIONS);
+        config.setMaxIdle(CONNECTIONS);
         // A pooled connection can outlive a Redis restart; PING it before use instead of failing a run.
         config.setTestOnBorrow(true);
         config.setMaxWait(Duration.ofSeconds(30));
@@ -37,65 +50,71 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
     }
 
     @Override
+    public int maxConcurrentFetches() {
+        return CONNECTIONS;
+    }
+
+    @Override
     public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {
-        return fetch(pubkeys, FOLLOWED_BY_KEY_PREFIX).get(0);
+        return fetch(pubkeys, ReverseSet.FOLLOWED_BY).get(ReverseSet.FOLLOWED_BY);
     }
 
     @Override
     public List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys) {
-        return fetch(pubkeys, MUTED_BY_KEY_PREFIX).get(0);
+        return fetch(pubkeys, ReverseSet.MUTED_BY).get(ReverseSet.MUTED_BY);
     }
 
     @Override
     public List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys) {
-        return fetch(pubkeys, REPORTED_BY_KEY_PREFIX).get(0);
+        return fetch(pubkeys, ReverseSet.REPORTED_BY).get(ReverseSet.REPORTED_BY);
     }
 
     /** One pipelined round trip for all three reverse sets of the batch. */
     @Override
     public IncomingRelationships getIncomingBulk(List<String> pubkeys) {
-        List<List<RelationshipInfo>> sets =
-                fetch(pubkeys, FOLLOWED_BY_KEY_PREFIX, MUTED_BY_KEY_PREFIX, REPORTED_BY_KEY_PREFIX);
-        return new IncomingRelationships(sets.get(0), sets.get(1), sets.get(2));
+        Map<ReverseSet, List<RelationshipInfo>> sets =
+                fetch(pubkeys, ReverseSet.FOLLOWED_BY, ReverseSet.MUTED_BY, ReverseSet.REPORTED_BY);
+        return new IncomingRelationships(
+                sets.get(ReverseSet.FOLLOWED_BY),
+                sets.get(ReverseSet.MUTED_BY),
+                sets.get(ReverseSet.REPORTED_BY));
     }
 
-    /** `SMEMBERS <prefix><pubkey>` for every pubkey and prefix, in one pipeline on a pooled
-     * connection. One list per prefix, in pubkey order. */
-    private List<List<RelationshipInfo>> fetch(List<String> pubkeys, String... prefixes) {
-        if (pubkeys == null) pubkeys = List.of();
-        List<List<Response<Set<String>>>> responses = new ArrayList<>();
-        for (int k = 0; k < prefixes.length; k++) responses.add(new ArrayList<>(pubkeys.size()));
-        if (!pubkeys.isEmpty()) {
+    /** `SMEMBERS` of each reverse set for every pubkey, in one pipeline on a pooled connection.
+     * Lists keep pubkey order, then Redis member order. */
+    private Map<ReverseSet, List<RelationshipInfo>> fetch(List<String> pubkeys, ReverseSet... sets) {
+        List<String> targets = pubkeys == null ? List.of() : pubkeys;
+        Map<ReverseSet, List<Response<Set<String>>>> responses = new EnumMap<>(ReverseSet.class);
+        for (ReverseSet set : sets) responses.put(set, new ArrayList<>(targets.size()));
+        if (!targets.isEmpty()) {
             try (Jedis jedis = pool.getResource()) {
                 Pipeline pipeline = jedis.pipelined();
-                for (String pk : pubkeys) {
-                    for (int k = 0; k < prefixes.length; k++) {
-                        responses.get(k).add(pipeline.smembers(prefixes[k] + pk));
+                for (String pk : targets) {
+                    for (ReverseSet set : sets) {
+                        responses.get(set).add(pipeline.smembers(set.keyPrefix + pk));
                     }
                 }
                 pipeline.sync();
             }
         }
-        List<List<RelationshipInfo>> out = new ArrayList<>();
-        for (int k = 0; k < prefixes.length; k++) {
-            out.add(toRelationships(pubkeys, responses.get(k), RELATIONSHIP_OF.get(prefixes[k])));
+
+        Map<ReverseSet, List<RelationshipInfo>> out = new EnumMap<>(ReverseSet.class);
+        for (ReverseSet set : sets) {
+            // Convert one set at a time and drop its raw replies, so they don't sit next to the result.
+            out.put(set, toRelationships(targets, responses.remove(set), set.relationship));
         }
         return out;
     }
 
-    private static final Map<String, String> RELATIONSHIP_OF = Map.of(
-            FOLLOWED_BY_KEY_PREFIX, "FOLLOWS",
-            MUTED_BY_KEY_PREFIX, "MUTES",
-            REPORTED_BY_KEY_PREFIX, "REPORTS");
-
     private static List<RelationshipInfo> toRelationships(
-            List<String> pubkeys, List<Response<Set<String>>> responses, String relationshipType) {
+            List<String> targets, List<Response<Set<String>>> responses, String relationship) {
         List<RelationshipInfo> out = new ArrayList<>();
-        for (int i = 0; i < pubkeys.size(); i++) {
+        for (int i = 0; i < targets.size(); i++) {
             Set<String> sources = responses.get(i).get();
+            responses.set(i, null);
             if (sources == null) continue;
             for (String source : sources) {
-                out.add(new RelationshipInfo(source, relationshipType, pubkeys.get(i)));
+                out.add(new RelationshipInfo(source, relationship, targets.get(i)));
             }
         }
         return out;
