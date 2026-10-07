@@ -3,9 +3,11 @@ package com.nosfabrica.graperank.grape;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.IRelationshipsCache;
+import com.nosfabrica.graperank.db.IncomingRelationships;
 import com.nosfabrica.graperank.db.ReachableUser;
 import com.nosfabrica.graperank.db.RelationshipInfo;
 import com.nosfabrica.graperank.rank.ScoreCard;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -16,6 +18,7 @@ import java.util.Map;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** The SoA implementation must reproduce {@link ReferenceGrapeRank} exactly: every scorecard
  * field, the scorecard map's iteration order, rounds and the changed / dropped lists. */
@@ -131,6 +134,81 @@ class GrapeRankEquivalenceTest {
                 assertSameDoubles(entry.getValue(), actual.getScorecards().get(entry.getKey()));
             }
         }
+    }
+
+    /** Batches complete out of order (random 0–15 ms per batch, 6 batches fetched in parallel);
+     * the result must not depend on fetch timing. */
+    @Test
+    void matchesTheReferenceWhenBatchesCompleteOutOfOrder() throws Exception {
+        Fixture f = fixture(5, 6000, 8, true);
+        Random delays = new Random(11);
+        IRelationshipsCache slow = new IRelationshipsCache() {
+            @Override
+            public List<RelationshipInfo> getIncomingFollowsBulk(List<String> batch) {
+                return f.cache().getIncomingFollowsBulk(batch);
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
+                return f.cache().getIncomingMutesBulk(batch);
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
+                return f.cache().getIncomingReportsBulk(batch);
+            }
+
+            @Override
+            public IncomingRelationships getIncomingBulk(List<String> batch) {
+                int delay;
+                synchronized (delays) {
+                    delay = delays.nextInt(16);
+                }
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return IRelationshipsCache.super.getIncomingBulk(batch);
+            }
+        };
+
+        GrapeRankResult expected = new ReferenceGrapeRank(f.graph(), f.cache())
+                .graperankAllSteps(f.observer(), Constants.DEFAULT_PARAMS, f.designated());
+        for (int run = 0; run < 3; run++) {
+            GrapeRankResult actual = new GrapeRankAlgorithm(f.graph(), slow)
+                    .graperankAllSteps(f.observer(), Constants.DEFAULT_PARAMS, f.designated());
+            assertEquals(MAPPER.writeValueAsString(expected.getScorecards()),
+                    MAPPER.writeValueAsString(actual.getScorecards()));
+            assertEquals(expected.getRounds(), actual.getRounds());
+            assertEquals(expected.getChangedScorePubkeys(), actual.getChangedScorePubkeys());
+        }
+    }
+
+    @Test
+    void aFailedFetchFailsTheRun() {
+        Fixture f = fixture(6, 3000, 5, true);
+        IRelationshipsCache failing = new IRelationshipsCache() {
+            @Override
+            public List<RelationshipInfo> getIncomingFollowsBulk(List<String> batch) {
+                if (batch.contains(f.observer())) return f.cache().getIncomingFollowsBulk(batch);
+                throw new IllegalStateException("redis down");
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingMutesBulk(List<String> batch) {
+                return f.cache().getIncomingMutesBulk(batch);
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
+                return f.cache().getIncomingReportsBulk(batch);
+            }
+        };
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () ->
+                new GrapeRankAlgorithm(f.graph(), failing).graperankAllSteps(f.observer()));
+        assertEquals("redis down", e.getMessage());
     }
 
     // JSON prints doubles shortest-round-trip, so it is exact already; this also covers -0.0 vs 0.0.

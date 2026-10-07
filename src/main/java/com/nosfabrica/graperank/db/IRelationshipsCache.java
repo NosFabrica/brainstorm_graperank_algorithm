@@ -10,4 +10,12 @@ public interface IRelationshipsCache {
     List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys);
 
     List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys);
+
+    /** All three for one batch. Must be safe to call from several threads at once. */
+    default IncomingRelationships getIncomingBulk(List<String> pubkeys) {
+        return new IncomingRelationships(
+                getIncomingFollowsBulk(pubkeys),
+                getIncomingMutesBulk(pubkeys),
+                getIncomingReportsBulk(pubkeys));
+    }
 }
