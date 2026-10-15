@@ -27,11 +27,11 @@ public class Main {
     private static final String[] QUEUE_NAMES = Scheduler.resolve();
     private static final String JOB_STARTED_QUEUE_NAME = "job_started_queue";
     private static final String RESULTS_QUEUE_NAME = "results_message_queue";
-    private static final String UPLOAD_NOSTR_RESULTS_QUEUE_NAME = "nostr_results_message_queue";
-    private static final String WRITE_NEO4J_RESULTS_QUEUE_NAME = "write_neo4j_message_queue";
 
     private static final String REDIS_HOST = System.getenv("REDIS_HOST");
     private static final int REDIS_PORT = Integer.parseInt(System.getenv("REDIS_PORT"));
+    // Jedis defaults to 2s; a busy Redis took longer than that to ack a large result write.
+    private static final int RESULT_WRITE_TIMEOUT_MS = 60_000;
 
     private static final String NEO4J_URL = System.getenv("NEO4J_URL");
     private static final String NEO4J_USERNAME = System.getenv("NEO4J_USERNAME");
@@ -135,7 +135,7 @@ public class Main {
     }
 
     private static void processMessage(String message) {
-        try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT)) {
+        try (Jedis redis = new Jedis(REDIS_HOST, REDIS_PORT, RESULT_WRITE_TIMEOUT_MS)) {
             JsonNode parsed = mapper.readTree(message);
             int privateId = parsed.get("private_id").asInt();
             String observer = parsed.get("parameters").asText();
@@ -172,9 +172,7 @@ public class Main {
             MessageQueueReturnValue finalMessage = new MessageQueueReturnValue(result, privateId);
             String finalJson = mapper.writeValueAsString(finalMessage);
 
-            redis.rpush(RESULTS_QUEUE_NAME, finalJson);
-            redis.rpush(UPLOAD_NOSTR_RESULTS_QUEUE_NAME, finalJson);
-            redis.rpush(WRITE_NEO4J_RESULTS_QUEUE_NAME, finalJson);
+            ResultPayload.publish(redis, privateId, finalJson);
 
             System.out.println("Finished processing: " + privateId);
 
