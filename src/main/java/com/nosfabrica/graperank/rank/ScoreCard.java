@@ -5,7 +5,8 @@ public class ScoreCard {
     private String observer;
     private String observee;
     private String context = "not a bot";
-    private double hops;
+    // Whole numbers on the wire (3, not 3.0): consumers bucket and tag by them as ints.
+    private int hops;
     private double averageScore = 0;
     private double input = 0;
     private double confidence = 0;
@@ -13,18 +14,18 @@ public class ScoreCard {
     private Boolean verified = null;
 
     @JsonProperty("trusted_followers")
-    private double trustedFollowers = 0;
+    private int trustedFollowers = 0;
 
     @JsonProperty("trusted_reporters")
-    private double trustedReporters = 0;
+    private int trustedReporters = 0;
 
     @JsonProperty("trusted_muters")
-    private double trustedMuters = 0;
+    private int trustedMuters = 0;
 
     public ScoreCard(String observer, String observee, double hops) {
         this.observer = observer;
         this.observee = observee;
-        this.hops = hops;
+        this.hops = (int) hops;
     }
 
     public ScoreCard(String observer, String observee, double averageScore, double input, double confidence,
@@ -62,12 +63,12 @@ public class ScoreCard {
         this.context = context;
     }
 
-    public double getHops() {
+    public int getHops() {
         return hops;
     }
 
     public void setHops(double hops) {
-        this.hops = hops;
+        this.hops = (int) hops;
     }
 
 
@@ -111,27 +112,27 @@ public class ScoreCard {
         this.verified = verified;
     }
 
-    public double getTrustedFollowers() {
+    public int getTrustedFollowers() {
         return trustedFollowers;
     }
 
     public void setTrustedFollowers(double trustedFollowers) {
-        this.trustedFollowers = trustedFollowers;
+        this.trustedFollowers = (int) trustedFollowers;
     }
 
-    public double getTrustedReporters() {
+    public int getTrustedReporters() {
         return trustedReporters;
     }
 
     public void setTrustedReporters(double trustedReporters) {
-        this.trustedReporters = trustedReporters;
+        this.trustedReporters = (int) trustedReporters;
     }
 
-    public double getTrustedMuters() {
+    public int getTrustedMuters() {
         return trustedMuters;
     }
 
     public void setTrustedMuters(double trustedMuters) {
-        this.trustedMuters = trustedMuters;
+        this.trustedMuters = (int) trustedMuters;
     }
 }
