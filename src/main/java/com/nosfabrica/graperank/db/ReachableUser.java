@@ -1,6 +1,10 @@
 package com.nosfabrica.graperank.db;
 
 /** A user the Observer reaches by follows: the shortest follow distance (0 for the
- * Observer) and the Influence the Observer last gave them (null if never scored). */
-public record ReachableUser(int hops, Double previousInfluence) {
+ * Observer) and the scores Neo4j holds from the Observer's last write (null if absent). */
+public record ReachableUser(int hops, Double storedInfluence, Long storedHops, Long storedTrustedFollowers) {
+
+    public ReachableUser(int hops, Double storedInfluence) {
+        this(hops, storedInfluence, null, null);
+    }
 }

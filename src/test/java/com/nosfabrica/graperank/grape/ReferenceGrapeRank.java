@@ -274,7 +274,7 @@ final class ReferenceGrapeRank {
         Map<String, Double> previousInfluence = new HashMap<>();
         Map<String, Double> userDistanceMap = new HashMap<>();
         for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
-            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            previousInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
             if (entry.getValue().hops() <= Constants.MAX_HOPS) {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }

@@ -133,7 +133,7 @@ public class GrapeRankAlgorithm {
         Map<String, Double> previousInfluence = new HashMap<>();
         Map<String, Double> userDistanceMap = new HashMap<>();
         for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
-            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            previousInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
             if (entry.getValue().hops() <= Constants.MAX_HOPS) {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }
@@ -255,6 +255,8 @@ public class GrapeRankAlgorithm {
                 + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         Map<String, ScoreCard> scorecards = graph.toScorecards(params.verifiedFollowersInfluenceCutoff());
+        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable);
+        System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size());
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
@@ -266,7 +268,7 @@ public class GrapeRankAlgorithm {
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
 
-        return new GrapeRankResult(
+        GrapeRankResult result = new GrapeRankResult(
                 scorecards,
                 rounds,
                 finalTime / 1000.0,
@@ -274,7 +276,29 @@ public class GrapeRankAlgorithm {
                 changedScorePubkeys,
                 droppedBelowCutoffPubkeys,
                 error);
+        result.setNeo4jWritePubkeys(neo4jWritePubkeys);
+        return result;
+    }
 
+    /** Scorecards whose persisted fields differ from what Neo4j holds, or that Neo4j holds none
+     * for. Influence is compared at the published 2-decimal precision. */
+    static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored) {
+        List<String> out = new ArrayList<>();
+        for (ScoreCard card : scorecards.values()) {
+            ReachableUser prev = stored.get(card.getObservee());
+            if (prev == null
+                    || prev.storedInfluence() == null
+                    || Double.compare(round2(prev.storedInfluence()), round2(card.getInfluence())) != 0
+                    || !Long.valueOf(card.getHops()).equals(prev.storedHops())
+                    || !Long.valueOf(card.getTrustedFollowers()).equals(prev.storedTrustedFollowers())) {
+                out.add(card.getObservee());
+            }
+        }
+        return out;
+    }
+
+    private static double round2(double x) {
+        return Math.round(x * 100.0) / 100.0;
     }
 
 }
