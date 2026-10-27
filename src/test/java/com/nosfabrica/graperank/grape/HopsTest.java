@@ -20,10 +20,10 @@ class HopsTest {
 
     private static Map<String, ScoreCard> run() {
         IGraphDB graph = observer -> Map.of(
-                OBSERVER, new ReachableUser(0, 1.0),
-                "near", new ReachableUser(1, null),
-                "edge", new ReachableUser(Constants.MAX_HOPS, null),
-                "far", new ReachableUser(Constants.MAX_HOPS + 1, null));
+                OBSERVER, new ReachableUser(0, 1.0, null, null),
+                "near", new ReachableUser(1, null, null, null),
+                "edge", new ReachableUser(Constants.MAX_HOPS, null, null, null),
+                "far", new ReachableUser(Constants.MAX_HOPS + 1, null, null, null));
         IRelationshipsCache noEdges = new IRelationshipsCache() {
             @Override
             public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {

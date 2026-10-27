@@ -71,7 +71,7 @@ class Neo4jWriteSetTest {
     @Test
     void aFirstRunWritesEveryScorecard() {
         GrapeRankResult result = new GrapeRankAlgorithm(
-                observer -> Map.of("observer", new ReachableUser(0, null), "near", new ReachableUser(1, null)),
+                observer -> Map.of("observer", new ReachableUser(0, null, null, null), "near", new ReachableUser(1, null, null, null)),
                 new NoEdges()).graperankAllSteps("observer");
         assertEquals(result.getScorecards().size(), result.getNeo4jWritePubkeys().size());
     }

@@ -26,20 +26,18 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
             throw new IllegalArgumentException("observer pubkey must be 64 hex chars");
         }
 
-        String stored = storedPropsReturn("other", observer);
-
         // One pruning BFS for distance, reach and the stored scores. Group on the node, not on
         // its properties: grouping on `other.influence_*` returns wrong values on Neo4j 5.26.
         String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
                 "WHERE other <> user " +
                 "WITH other, min(length(p)) AS hops " +
-                "RETURN other.pubkey AS pubkey, hops, " + stored;
+                "RETURN other.pubkey AS pubkey, hops, " + STORED_PROPS;
 
         Map<String, ReachableUser> result = new HashMap<>();
 
         try (Session session = driver.session()) {
             List<Record> records = session.readTransaction(tx -> {
-                Result statementResult = tx.run(query, Values.parameters("pubkey", observer));
+                Result statementResult = tx.run(query, storedKeys(observer));
                 return statementResult.list();
             });
 
@@ -56,21 +54,26 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
     }
 
     private ReachableUser getObserver(String observer) {
-        String query = "MATCH (other:NostrUser {pubkey: $pubkey}) RETURN " + storedPropsReturn("other", observer) + " LIMIT 1";
+        String query = "MATCH (other:NostrUser {pubkey: $pubkey}) RETURN " + STORED_PROPS + " LIMIT 1";
         try (Session session = driver.session()) {
             Record record = session.readTransaction(tx -> {
-                Result statementResult = tx.run(query, Values.parameters("pubkey", observer));
+                Result statementResult = tx.run(query, storedKeys(observer));
                 return statementResult.single();
             });
             return reachableUser(0, record);
         }
     }
 
-    // Property names interpolated: `observer` is validated hex.
-    private static String storedPropsReturn(String node, String observer) {
-        return node + ".influence_" + observer + " AS influence, " +
-                node + ".hops_" + observer + " AS storedHops, " +
-                node + ".trusted_followers_" + observer + " AS storedTrustedFollowers";
+    // Keys as parameters, not in the query text: one cached plan for every observer.
+    private static final String STORED_PROPS = "other[$influenceKey] AS influence, " +
+            "other[$hopsKey] AS storedHops, other[$trustedFollowersKey] AS storedTrustedFollowers";
+
+    private static Value storedKeys(String observer) {
+        return Values.parameters(
+                "pubkey", observer,
+                "influenceKey", "influence_" + observer,
+                "hopsKey", "hops_" + observer,
+                "trustedFollowersKey", "trusted_followers_" + observer);
     }
 
     private static ReachableUser reachableUser(int hops, Record record) {
