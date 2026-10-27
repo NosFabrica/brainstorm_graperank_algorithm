@@ -255,8 +255,10 @@ public class GrapeRankAlgorithm {
                 + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         Map<String, ScoreCard> scorecards = graph.toScorecards(params.verifiedFollowersInfluenceCutoff());
-        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable);
-        System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size());
+        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
+        List<String> neo4jClearPubkeys = neo4jClearPubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
+        System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size()
+                + ", clear set: " + neo4jClearPubkeys.size());
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
@@ -277,20 +279,39 @@ public class GrapeRankAlgorithm {
                 droppedBelowCutoffPubkeys,
                 error);
         result.setNeo4jWritePubkeys(neo4jWritePubkeys);
+        result.setNeo4jClearPubkeys(neo4jClearPubkeys);
+        result.setNeo4jPersistFloor(Constants.PERSIST_FLOOR);
         return result;
     }
 
-    /** Scorecards whose persisted fields differ from what Neo4j holds, or that Neo4j holds none
-     * for. Influence is compared at the published 2-decimal precision. */
-    static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored) {
+    /** Scorecards above the persist floor whose persisted fields differ from what Neo4j holds, or
+     * that Neo4j holds none for. Influence is compared at the published 2-decimal precision. */
+    static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored,
+                                          double floor) {
         List<String> out = new ArrayList<>();
         for (ScoreCard card : scorecards.values()) {
+            if (card.getInfluence() <= floor) continue;
             ReachableUser prev = stored.get(card.getObservee());
             if (prev == null
                     || prev.storedInfluence() == null
                     || Double.compare(round2(prev.storedInfluence()), round2(card.getInfluence())) != 0
                     || !Long.valueOf(card.getHops()).equals(prev.storedHops())
                     || !Long.valueOf(card.getTrustedFollowers()).equals(prev.storedTrustedFollowers())) {
+                out.add(card.getObservee());
+            }
+        }
+        return out;
+    }
+
+    /** Scorecards at or below the persist floor that Neo4j still holds any score for. */
+    static List<String> neo4jClearPubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored,
+                                          double floor) {
+        List<String> out = new ArrayList<>();
+        for (ScoreCard card : scorecards.values()) {
+            if (card.getInfluence() > floor) continue;
+            ReachableUser prev = stored.get(card.getObservee());
+            if (prev != null && (prev.storedInfluence() != null || prev.storedHops() != null
+                    || prev.storedTrustedFollowers() != null)) {
                 out.add(card.getObservee());
             }
         }
