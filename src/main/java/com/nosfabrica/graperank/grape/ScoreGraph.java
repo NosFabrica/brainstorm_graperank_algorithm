@@ -25,6 +25,8 @@ final class ScoreGraph {
     final double[] confidence;
     final double[] influence;
     final boolean[] pinned;
+    /** Multiplies each computed Influence: the NIP-05 penalty, 1.0 for nearly everyone. */
+    final double[] factor;
 
     double[] trustedFollowers;
     double[] trustedReporters;
@@ -49,6 +51,8 @@ final class ScoreGraph {
         confidence = new double[n];
         influence = new double[n];
         pinned = new boolean[n];
+        factor = new double[n];
+        Arrays.fill(factor, 1.0);
         for (int i = 0; i < n; i++) {
             if (pubkeys[i].equals(observer)) {
                 averageScore[i] = 1.0;
@@ -73,6 +77,12 @@ final class ScoreGraph {
         confidence[id] = 1.0;
         influence[id] = Constants.DESIGNATED_KEY_INFLUENCE;
         pinned[id] = true;
+    }
+
+    /** Scale a user's computed Influence every round. Pinned users — the Observer and the keys the
+     * Observer designated — are the Observer's own choice and are never scaled. */
+    void penalize(int id, double f) {
+        if (!pinned[id]) factor[id] = f;
     }
 
     /** Sweep until no Influence moves by more than the loop-break threshold. Returns rounds. */
@@ -108,7 +118,8 @@ final class ScoreGraph {
                 input[i] = sumOfWeights;
                 confidence[i] = GrapeRankAlgorithm.convertInputToConfidence(sumOfWeights, rigor);
 
-                double computedInfluence = Math.max(avgScore * confidence[i], 0);
+                // Inside the sweep, so a penalised user's ratings carry the reduced weight too.
+                double computedInfluence = Math.max(avgScore * confidence[i], 0) * factor[i];
                 if (Math.abs(computedInfluence - influence[i])
                         > Constants.THRESHOLD_OF_LOOP_BREAK_GIVEN_MINIMUM_DELTA_INFLUENCE) {
                     shouldBreak = false;

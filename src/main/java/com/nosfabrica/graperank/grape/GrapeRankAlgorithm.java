@@ -105,6 +105,29 @@ public class GrapeRankAlgorithm {
         return designations;
     }
 
+    /** Each relevant user's NIP-05 penalty (ADR 0006): from the follow walk for users it reached,
+     * from one lookup for the rest (keys reached only by designation). Returns how many apply. */
+    private int applyNip05Penalties(ScoreGraph graph, Map<String, ReachableUser> reachable, List<String> relevantUsers) {
+        Map<String, String> statuses = new HashMap<>();
+        List<String> unreached = new ArrayList<>();
+        for (String pubkey : relevantUsers) {
+            ReachableUser user = reachable.get(pubkey);
+            if (user == null) unreached.add(pubkey);
+            else if (user.nip05Status() != null) statuses.put(pubkey, user.nip05Status());
+        }
+        if (!unreached.isEmpty()) statuses.putAll(db.getPenalisedNip05Statuses(unreached));
+        int applied = 0;
+        for (Map.Entry<String, String> entry : statuses.entrySet()) {
+            double f = Constants.nip05Factor(entry.getValue());
+            int id = graph.idOf.get(entry.getKey());
+            if (f != 1.0 && !graph.pinned[id]) {
+                graph.penalize(id, f);
+                applied++;
+            }
+        }
+        return applied;
+    }
+
     /** Pubkeys the Observer designated in their kind-10040 (the keys they trust to
      * publish assertions for them), minus the Observer. */
     static Set<String> designatedUsersOf(String observer, Collection<String> designatedPubkeys) {
@@ -221,9 +244,11 @@ public class GrapeRankAlgorithm {
         for (String pubkey : designatedUsers) {
             graph.pin(graph.idOf.get(pubkey));
         }
+        int penalised = applyNip05Penalties(graph, reachable, relevantUsers);
         int n = graph.size();
         System.out.println("TIMING scorecard init took "
-                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
+                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds ("
+                + penalised + " NIP-05 penalties)");
 
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 

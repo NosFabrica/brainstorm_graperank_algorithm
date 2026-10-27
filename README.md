@@ -41,6 +41,13 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   `DESIGNATION_RATING` (0.95) at follow confidence, appended after each ratee's follows, mutes and
   reports. A designated key joins the run even when no follow reaches it (hops `UNREACHABLE_HOPS`).
 
+- **NIP-05 penalties** (brainstorm_server ADR 0006) — `factor[i]` multiplies each computed Influence
+  inside the sweep: 0 for a confirmed impersonation (the domain gives the user's claimed name to another
+  key), 0.5 for a claim the domain does not back, 1 for everyone else. Inside the sweep, not on the
+  published number, so what a penalised user passes to the people they follow shrinks with it. Statuses
+  come from the follow walk's Neo4j query (`nip05_status`, written by brainstorm_profile_resolver), plus
+  one lookup for keys reached only by designation. Pinned users are never penalised.
+
 The loop updates Influence in place, so the order users are visited in, and the order of each user's
 ratings (follows → mutes → reports), change the result. Keep both as they are, or
 `GrapeRankEquivalenceTest` fails.

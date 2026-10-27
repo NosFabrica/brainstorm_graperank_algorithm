@@ -30,6 +30,23 @@ public class Constants {
     // follow does (same confidence, weighted by the designator's Influence), at 0.95.
     public static final double DESIGNATION_RATING = 0.95;
 
+    // NIP-05 penalties (brainstorm_server ADR 0006), applied to a user's Influence inside the
+    // iteration so what they pass on shrinks with it. brainstorm_profile_resolver records the
+    // statuses; anything else — none, VERIFIED, SUSPECTED, UNKNOWN, PENDING — costs nothing.
+    // The domain gives this name to another key, confirmed on two checks: someone else's name.
+    public static final double NIP05_IMPERSONATION_FACTOR = 0.0;
+    // The domain answered without backing the claim (name missing, or a 404).
+    public static final double NIP05_NOT_LISTED_FACTOR = 0.5;
+
+    public static final java.util.Set<String> PENALISED_NIP05_STATUSES = java.util.Set.of("IMPERSONATION", "NOT_LISTED");
+
+    /** The multiplier a NIP-05 status puts on Influence. */
+    public static double nip05Factor(String status) {
+        if ("IMPERSONATION".equals(status)) return NIP05_IMPERSONATION_FACTOR;
+        if ("NOT_LISTED".equals(status)) return NIP05_NOT_LISTED_FACTOR;
+        return 1.0;
+    }
+
     public static final double DEFAULT_CUTOFF_OF_VALID_USER = 0.02;
 
     public static final double DEFAULT_CUTOFF_OF_TRUSTED_REPORTER = 0.1;
