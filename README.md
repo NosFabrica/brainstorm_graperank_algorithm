@@ -35,7 +35,8 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   reporters (for the trusted counts) use the same layout.
 - **Pinned users** — the Observer and their designated (kind-10040) keys — are seeded once and never
   recomputed (`pinned[i]`).
-- **Designations** — everyone else's kind-10040 keys, read from the forward `designates:<pubkey>` sets
+- **Designations** — everyone else's kind-10040 keys and NIP-57 zap signers, read from the forward
+  `designates:<pubkey>` and `zaps_via:<pubkey>` sets (the latter written by brainstorm_profile_resolver)
   for every reachable user before the graph is built — are one more rating kind (`DESIGNATE`): rating
   `DESIGNATION_RATING` (0.95) at follow confidence, appended after each ratee's follows, mutes and
   reports. A designated key joins the run even when no follow reaches it (hops `UNREACHABLE_HOPS`).

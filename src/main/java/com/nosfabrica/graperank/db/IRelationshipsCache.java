@@ -27,7 +27,8 @@ public interface IRelationshipsCache {
                 getIncomingReportsBulk(pubkeys));
     }
 
-    /** The keys each of `designators` named in their kind-10040 (`designates:<pubkey>`).
+    /** The keys each of `designators` chose: those named in their kind-10040 (`designates:<pubkey>`)
+     * and the signer of their zap receipts (`zaps_via:<pubkey>`).
      * A designator with none is absent. Called from up to {@link #maxConcurrentFetches()}
      * threads at once. */
     default Map<String, Set<String>> getDesignationsBulk(List<String> designators) {
