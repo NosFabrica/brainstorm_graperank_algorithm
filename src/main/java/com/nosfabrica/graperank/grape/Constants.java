@@ -26,6 +26,10 @@ public class Constants {
     // in their kind-10040 — the keys they designated to publish assertions.
     public static final double DESIGNATED_KEY_INFLUENCE = 0.95;
 
+    // Rating carried by anyone else's kind-10040 designation: it rates the key like a
+    // follow does (same confidence, weighted by the designator's Influence), at 0.95.
+    public static final double DESIGNATION_RATING = 0.95;
+
     public static final double DEFAULT_CUTOFF_OF_VALID_USER = 0.02;
 
     public static final double DEFAULT_CUTOFF_OF_TRUSTED_REPORTER = 0.1;

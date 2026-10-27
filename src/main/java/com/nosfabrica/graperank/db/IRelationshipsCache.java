@@ -1,9 +1,12 @@
 package com.nosfabrica.graperank.db;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-/** The reverse-set caches the algorithm reads (`followed_by:` / `muted_by:` /
- * `reported_by:`). Redis-backed in production; fakeable in tests. */
+/** The caches the algorithm reads: the reverse sets (`followed_by:` / `muted_by:` /
+ * `reported_by:`) and the forward `designates:` sets. Redis-backed in production;
+ * fakeable in tests. */
 public interface IRelationshipsCache {
     List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys);
 
@@ -22,5 +25,12 @@ public interface IRelationshipsCache {
                 getIncomingFollowsBulk(pubkeys),
                 getIncomingMutesBulk(pubkeys),
                 getIncomingReportsBulk(pubkeys));
+    }
+
+    /** The keys each of `designators` named in their kind-10040 (`designates:<pubkey>`).
+     * A designator with none is absent. Called from up to {@link #maxConcurrentFetches()}
+     * threads at once. */
+    default Map<String, Set<String>> getDesignationsBulk(List<String> designators) {
+        return Map.of();
     }
 }

@@ -82,9 +82,10 @@ final class ScoreGraph {
         final byte[] kind = ratings.kind;
         final double[] ratingConfidence = {
                 params.followConfidence(), params.followConfidenceOfObserver(),
-                params.muteConfidence(), params.reportConfidence()};
+                params.muteConfidence(), params.reportConfidence(), params.followConfidence()};
         final double[] rating = {
-                params.followRating(), params.followRating(), params.muteRating(), params.reportRating()};
+                params.followRating(), params.followRating(), params.muteRating(), params.reportRating(),
+                Constants.DESIGNATION_RATING};
         final double attenuation = params.attenuationFactor();
         final double rigor = params.rigor();
         int rounds = 0;
@@ -122,11 +123,13 @@ final class ScoreGraph {
     }
 
     /** Per ratee, how many followers / muters / reporters clear their preset cutoff — raw
-     * Influence, strict `>`. The Observer's own follows count as follows. */
+     * Influence, strict `>`. The Observer's own follows count as follows; designations
+     * count as none of them. */
     void countTrustedRaters(Csr ratings, GrapeRankParams params) {
         double[] cutoff = {
                 params.verifiedFollowersInfluenceCutoff(), params.verifiedFollowersInfluenceCutoff(),
-                params.verifiedMutersInfluenceCutoff(), params.verifiedReportersInfluenceCutoff()};
+                params.verifiedMutersInfluenceCutoff(), params.verifiedReportersInfluenceCutoff(),
+                Double.POSITIVE_INFINITY};
         int n = pubkeys.length;
         trustedFollowers = new double[n];
         trustedMuters = new double[n];
@@ -139,7 +142,8 @@ final class ScoreGraph {
                     switch (k) {
                         case FOLLOW, OBSERVER_FOLLOW -> followers++;
                         case MUTE -> muters++;
-                        default -> reporters++;
+                        case REPORT -> reporters++;
+                        default -> { }
                     }
                 }
             }
@@ -172,6 +176,7 @@ final class ScoreGraph {
     static final byte OBSERVER_FOLLOW = 1;
     static final byte MUTE = 2;
     static final byte REPORT = 3;
+    static final byte DESIGNATE = 4;
 
     /** Compressed sparse rows: row `i`'s edges are `src[off[i] .. off[i + 1])`, with each edge's kind
      * at the same position. */

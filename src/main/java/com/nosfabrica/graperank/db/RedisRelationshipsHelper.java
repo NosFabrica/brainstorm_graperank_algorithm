@@ -9,6 +9,7 @@ import redis.clients.jedis.Response;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +32,9 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
             this.relationship = relationship;
         }
     }
+
+    /** Forward set: the keys a user designated in their kind-10040. */
+    private static final String DESIGNATES_PREFIX = "designates:";
 
     private final JedisPool pool;
 
@@ -78,6 +82,24 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
                 sets.get(ReverseSet.FOLLOWED_BY),
                 sets.get(ReverseSet.MUTED_BY),
                 sets.get(ReverseSet.REPORTED_BY));
+    }
+
+    /** `SMEMBERS designates:<pubkey>` for every designator, in one pipeline. */
+    @Override
+    public Map<String, Set<String>> getDesignationsBulk(List<String> designators) {
+        Map<String, Set<String>> out = new HashMap<>();
+        if (designators == null || designators.isEmpty()) return out;
+        List<Response<Set<String>>> responses = new ArrayList<>(designators.size());
+        try (Jedis jedis = pool.getResource()) {
+            Pipeline pipeline = jedis.pipelined();
+            for (String pk : designators) responses.add(pipeline.smembers(DESIGNATES_PREFIX + pk));
+            pipeline.sync();
+        }
+        for (int i = 0; i < designators.size(); i++) {
+            Set<String> designated = responses.get(i).get();
+            if (designated != null && !designated.isEmpty()) out.put(designators.get(i), designated);
+        }
+        return out;
     }
 
     /** `SMEMBERS` of each reverse set for every pubkey, in one pipeline on a pooled connection.
