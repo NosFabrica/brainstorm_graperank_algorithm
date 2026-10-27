@@ -121,8 +121,24 @@ final class ScoreGraph {
         }
     }
 
-    /** Per ratee, how many followers / muters / reporters clear their preset cutoff — raw
-     * Influence, strict `>`. The Observer's own follows count as follows. */
+    /** Dead zone: an Influence that moved less than `width` from its stored value takes the
+     * stored value, so every cutoff, rounding and diff after this reads the same number as
+     * last run. Pinned users keep their fixed value. Returns how many were held. */
+    int holdInfluence(Map<String, Double> stored, double width) {
+        int held = 0;
+        for (int i = 0; i < pubkeys.length; i++) {
+            if (pinned[i]) continue;
+            Double prev = stored.get(pubkeys[i]);
+            if (prev != null && prev != influence[i] && Math.abs(influence[i] - prev) < width) {
+                influence[i] = prev;
+                held++;
+            }
+        }
+        return held;
+    }
+
+    /** Per ratee, how many followers / muters / reporters clear their preset cutoff — held
+     * Influence ({@link #holdInfluence}), strict `>`. The Observer's own follows count as follows. */
     void countTrustedRaters(Csr ratings, GrapeRankParams params) {
         double[] cutoff = {
                 params.verifiedFollowersInfluenceCutoff(), params.verifiedFollowersInfluenceCutoff(),
