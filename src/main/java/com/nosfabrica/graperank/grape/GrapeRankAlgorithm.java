@@ -130,18 +130,18 @@ public class GrapeRankAlgorithm {
 
         long reachStartTime = System.currentTimeMillis();
         Map<String, ReachableUser> reachable = db.getReachableUsers(observer);
-        Map<String, Double> previousInfluence = new HashMap<>();
+        Map<String, Double> storedInfluence = new HashMap<>();
         Map<String, Double> userDistanceMap = new HashMap<>();
         for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
-            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            storedInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
             if (entry.getValue().hops() <= Constants.MAX_HOPS) {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }
         }
-        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
+        List<String> relevantUsers = new ArrayList<>(storedInfluence.keySet());
         Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
         for (String pubkey : designatedUsers) {
-            if (!previousInfluence.containsKey(pubkey)) {
+            if (!storedInfluence.containsKey(pubkey)) {
                 relevantUsers.add(pubkey);
             }
         }
@@ -232,7 +232,7 @@ public class GrapeRankAlgorithm {
             double newScore = graph.influence[i];
             double newRounded = Math.round(newScore * 100.0) / 100.0;
 
-            Double prev = previousInfluence.get(pubkey);
+            Double prev = storedInfluence.get(pubkey);
             boolean hasPrev = prev != null;
             double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
 
@@ -255,18 +255,20 @@ public class GrapeRankAlgorithm {
                 + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         Map<String, ScoreCard> scorecards = graph.toScorecards(params.verifiedFollowersInfluenceCutoff());
+        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable);
+        System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size());
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
         // Graph users only: designated keys are added regardless of the graph, so an
         // Observer with no follows but a kind-10040 is still "not connected".
-        boolean success = previousInfluence.size() > 1;
+        boolean success = storedInfluence.size() > 1;
         GrapeRankError error = success
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
 
-        return new GrapeRankResult(
+        GrapeRankResult result = new GrapeRankResult(
                 scorecards,
                 rounds,
                 finalTime / 1000.0,
@@ -274,7 +276,29 @@ public class GrapeRankAlgorithm {
                 changedScorePubkeys,
                 droppedBelowCutoffPubkeys,
                 error);
+        result.setNeo4jWritePubkeys(neo4jWritePubkeys);
+        return result;
+    }
 
+    /** Scorecards whose persisted fields differ from what Neo4j holds, or that Neo4j holds none
+     * for. Influence is compared at the published 2-decimal precision. */
+    static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored) {
+        List<String> out = new ArrayList<>();
+        for (ScoreCard card : scorecards.values()) {
+            ReachableUser prev = stored.get(card.getObservee());
+            if (prev == null
+                    || prev.storedInfluence() == null
+                    || Double.compare(round2(prev.storedInfluence()), round2(card.getInfluence())) != 0
+                    || !Long.valueOf(card.getHops()).equals(prev.storedHops())
+                    || !Long.valueOf(card.getTrustedFollowers()).equals(prev.storedTrustedFollowers())) {
+                out.add(card.getObservee());
+            }
+        }
+        return out;
+    }
+
+    private static double round2(double x) {
+        return Math.round(x * 100.0) / 100.0;
     }
 
 }

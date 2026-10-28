@@ -35,9 +35,9 @@ final class ObserverMuterSubjectFixture {
         @Override
         public Map<String, ReachableUser> getReachableUsers(String observer) {
             Map<String, ReachableUser> reachable = new HashMap<>();
-            reachable.put(OBSERVER, new ReachableUser(0, 1.0));
-            reachable.put(MUTER, new ReachableUser(1, 0.0));
-            reachable.put(SUBJECT, new ReachableUser(Constants.MAX_HOPS + 1, 0.0));
+            reachable.put(OBSERVER, new ReachableUser(0, 1.0, null, null));
+            reachable.put(MUTER, new ReachableUser(1, 0.0, null, null));
+            reachable.put(SUBJECT, new ReachableUser(Constants.MAX_HOPS + 1, 0.0, null, null));
             return reachable;
         }
     }
