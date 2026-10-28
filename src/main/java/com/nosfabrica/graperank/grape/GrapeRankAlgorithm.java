@@ -115,12 +115,12 @@ public class GrapeRankAlgorithm {
             if (user == null) unreached.add(pubkey);
             else if (user.nip05Status() != null) statuses.put(pubkey, user.nip05Status());
         }
-        if (!unreached.isEmpty()) statuses.putAll(db.getPenalisedNip05Statuses(unreached));
+        for (List<String> batch : chunked(unreached, BATCH_SIZE)) statuses.putAll(db.getPenalisedNip05Statuses(batch));
         int applied = 0;
         for (Map.Entry<String, String> entry : statuses.entrySet()) {
             double f = Constants.nip05Factor(entry.getValue());
-            int id = graph.idOf.get(entry.getKey());
-            if (f != 1.0 && !graph.pinned[id]) {
+            Integer id = graph.idOf.get(entry.getKey());
+            if (id != null && f != 1.0 && !graph.pinned[id]) {
                 graph.penalize(id, f);
                 applied++;
             }
@@ -215,7 +215,14 @@ public class GrapeRankAlgorithm {
 
         long designationStartTime = System.currentTimeMillis();
         int parallelism = relationshipsCache.maxConcurrentFetches();
-        Map<String, Set<String>> designations = fetchDesignations(designators, parallelism);
+        // The Observer's own are read even when the follow walk returned nothing (no follows yet):
+        // a zap signer is known only from `zaps_via:`.
+        List<String> designationsToRead = designators;
+        if (!previousInfluence.containsKey(observer)) {
+            designationsToRead = new ArrayList<>(designators);
+            designationsToRead.add(observer);
+        }
+        Map<String, Set<String>> designations = fetchDesignations(designationsToRead, parallelism);
         Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
         designatedUsers.addAll(designatedUsersOf(observer, designations.get(observer)));
 
