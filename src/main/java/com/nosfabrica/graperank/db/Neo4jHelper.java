@@ -1,5 +1,6 @@
 package com.nosfabrica.graperank.db;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +33,8 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
         String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
                 "WHERE other <> user " +
                 "WITH other, min(length(p)) AS hops " +
-                "RETURN other.pubkey AS pubkey, hops, other." + influenceProp + " AS influence";
+                "RETURN other.pubkey AS pubkey, hops, other." + influenceProp + " AS influence, " +
+                "other.nip05_status AS nip05Status";
 
         Map<String, ReachableUser> result = new HashMap<>();
 
@@ -48,11 +50,28 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
                 for (Record record : records) {
                     Value infValue = record.get("influence");
                     Double influence = infValue.isNull() ? null : infValue.asDouble();
-                    result.put(record.get("pubkey").asString(), new ReachableUser(record.get("hops").asInt(), influence));
+                    Value nip05 = record.get("nip05Status");
+                    result.put(record.get("pubkey").asString(), new ReachableUser(
+                            record.get("hops").asInt(), influence, nip05.isNull() ? null : nip05.asString()));
                 }
             }
         }
 
+        return result;
+    }
+
+    @Override
+    public Map<String, String> getPenalisedNip05Statuses(Collection<String> pubkeys) {
+        Map<String, String> result = new HashMap<>();
+        if (pubkeys == null || pubkeys.isEmpty()) return result;
+        String query = "UNWIND $pubkeys AS pk MATCH (u:NostrUser {pubkey: pk}) " +
+                "WHERE u.nip05_status IN $penalised RETURN u.pubkey AS pubkey, u.nip05_status AS status";
+        try (Session session = driver.session()) {
+            List<Record> records = session.readTransaction(tx -> tx.run(query, Values.parameters(
+                    "pubkeys", List.copyOf(pubkeys),
+                    "penalised", List.copyOf(com.nosfabrica.graperank.grape.Constants.PENALISED_NIP05_STATUSES))).list());
+            for (Record record : records) result.put(record.get("pubkey").asString(), record.get("status").asString());
+        }
         return result;
     }
 

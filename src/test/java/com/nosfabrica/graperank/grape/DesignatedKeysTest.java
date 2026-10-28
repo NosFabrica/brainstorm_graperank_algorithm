@@ -84,4 +84,40 @@ class DesignatedKeysTest {
 
         assertFalse(result.isSuccess());
     }
+
+    /** An Observer the follow walk returned nothing for still has their own zap signer
+     * (known only from `zaps_via:`) read and pinned. */
+    @Test
+    void readsTheObserversOwnDesignationsWhenTheWalkIsEmpty() {
+        IGraphDB noWalk = observer -> Map.of();
+        java.util.List<java.util.List<String>> asked = new java.util.ArrayList<>();
+        IRelationshipsCache signerOnly = new IRelationshipsCache() {
+            @Override
+            public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {
+                return List.of();
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys) {
+                return List.of();
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys) {
+                return List.of();
+            }
+
+            @Override
+            public Map<String, java.util.Set<String>> getDesignationsBulk(List<String> designators) {
+                asked.add(List.copyOf(designators));
+                return designators.contains(OBSERVER) ? Map.of(OBSERVER, java.util.Set.of(UNREACHED)) : Map.of();
+            }
+        };
+
+        GrapeRankResult result = new GrapeRankAlgorithm(noWalk, signerOnly)
+                .graperankAllSteps(OBSERVER, Constants.DEFAULT_PARAMS, List.of());
+
+        assertEquals(List.of(List.of(OBSERVER)), asked);
+        assertEquals(Constants.DESIGNATED_KEY_INFLUENCE, result.getScorecards().get(UNREACHED).getInfluence());
+    }
 }

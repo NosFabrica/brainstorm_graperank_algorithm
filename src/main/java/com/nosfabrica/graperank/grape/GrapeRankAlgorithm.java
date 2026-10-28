@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,6 +64,68 @@ public class GrapeRankAlgorithm {
             added++;
         }
         return added;
+    }
+
+    /** Each designation by someone other than the Observer, as a rating of its kind:
+     * designators in relevant-user order, their keys sorted, so the edge order — part
+     * of the result — doesn't depend on fetch order. The Observer's own are pinned
+     * instead. Returns how many it kept. */
+    private static int addDesignations(
+            List<String> designators, Map<String, Set<String>> designations,
+            ScoreGraph graph, ScoreGraph.EdgeList ratings) {
+        int added = 0;
+        for (String designator : designators) {
+            Set<String> designated = designations.get(designator);
+            if (designated == null || designator.equals(graph.observer)) continue;
+            Integer rater = graph.idOf.get(designator);
+            if (rater == null) continue;
+            for (String pubkey : new TreeSet<>(designated)) {
+                Integer ratee = graph.idOf.get(pubkey);
+                if (ratee == null || pubkey.equals(designator)) continue;
+                ratings.add(ratee, rater, ScoreGraph.DESIGNATE);
+                added++;
+            }
+        }
+        return added;
+    }
+
+    /** Every designator's `designates:` set, fetched in batches on `parallelism` threads. */
+    private Map<String, Set<String>> fetchDesignations(List<String> designators, int parallelism) {
+        Map<String, Set<String>> designations = new HashMap<>();
+        ExecutorService fetchers = Executors.newFixedThreadPool(parallelism, daemonThreads());
+        try {
+            List<Future<Map<String, Set<String>>>> batches = new ArrayList<>();
+            for (List<String> batch : chunked(designators, BATCH_SIZE)) {
+                batches.add(fetchers.submit(() -> relationshipsCache.getDesignationsBulk(batch)));
+            }
+            for (Future<Map<String, Set<String>>> batch : batches) designations.putAll(await(batch));
+        } finally {
+            fetchers.shutdownNow();
+        }
+        return designations;
+    }
+
+    /** Each relevant user's NIP-05 penalty (ADR 0006): from the follow walk for users it reached,
+     * from one lookup for the rest (keys reached only by designation). Returns how many apply. */
+    private int applyNip05Penalties(ScoreGraph graph, Map<String, ReachableUser> reachable, List<String> relevantUsers) {
+        Map<String, String> statuses = new HashMap<>();
+        List<String> unreached = new ArrayList<>();
+        for (String pubkey : relevantUsers) {
+            ReachableUser user = reachable.get(pubkey);
+            if (user == null) unreached.add(pubkey);
+            else if (user.nip05Status() != null) statuses.put(pubkey, user.nip05Status());
+        }
+        for (List<String> batch : chunked(unreached, BATCH_SIZE)) statuses.putAll(db.getPenalisedNip05Statuses(batch));
+        int applied = 0;
+        for (Map.Entry<String, String> entry : statuses.entrySet()) {
+            double f = Constants.nip05Factor(entry.getValue());
+            Integer id = graph.idOf.get(entry.getKey());
+            if (id != null && f != 1.0 && !graph.pinned[id]) {
+                graph.penalize(id, f);
+                applied++;
+            }
+        }
+        return applied;
     }
 
     /** Pubkeys the Observer designated in their kind-10040 (the keys they trust to
@@ -121,9 +184,15 @@ public class GrapeRankAlgorithm {
         return graperankAllSteps(observer, params, List.of());
     }
 
-    /** `designatedPubkeys`: the keys the Observer listed in their kind-10040. They
+    /** `designatedPubkeys`: the keys the Observer listed in their kind-10040, as the
+     * request carries them; the Observer's own `designates:` set adds to them. They
      * are scored at {@link Constants#DESIGNATED_KEY_INFLUENCE} regardless of the
-     * graph, and scored even when the Observer's graph never reaches them. */
+     * graph, and scored even when the Observer's graph never reaches them.
+     *
+     * Everyone else the Observer reaches rates their designated keys at
+     * {@link Constants#DESIGNATION_RATING}, and those keys join the run even when no
+     * follow reaches them. One level only: a key reached just by designation doesn't
+     * have its own designations read. */
     public GrapeRankResult graperankAllSteps(
             String observer, GrapeRankParams params, Collection<String> designatedPubkeys) {
         long startTime = System.currentTimeMillis();
@@ -138,17 +207,41 @@ public class GrapeRankAlgorithm {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }
         }
-        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
-        Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
-        for (String pubkey : designatedUsers) {
-            if (!previousInfluence.containsKey(pubkey)) {
-                relevantUsers.add(pubkey);
-            }
-        }
+        List<String> designators = new ArrayList<>(previousInfluence.keySet());
         System.out.println("TIMING reachable-users fetch took "
                 + (System.currentTimeMillis() - reachStartTime) / 1000.0
-                + " seconds (" + relevantUsers.size() + " relevant users, "
+                + " seconds (" + designators.size() + " reachable users, "
                 + userDistanceMap.size() + " within " + Constants.MAX_HOPS + " hops)");
+
+        long designationStartTime = System.currentTimeMillis();
+        int parallelism = relationshipsCache.maxConcurrentFetches();
+        // The Observer's own are read even when the follow walk returned nothing (no follows yet):
+        // a zap signer is known only from `zaps_via:`.
+        List<String> designationsToRead = designators;
+        if (!previousInfluence.containsKey(observer)) {
+            designationsToRead = new ArrayList<>(designators);
+            designationsToRead.add(observer);
+        }
+        Map<String, Set<String>> designations = fetchDesignations(designationsToRead, parallelism);
+        Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
+        designatedUsers.addAll(designatedUsersOf(observer, designations.get(observer)));
+
+        List<String> relevantUsers = new ArrayList<>(designators);
+        Set<String> relevant = new HashSet<>(designators);
+        for (String designator : designators) {
+            Set<String> designated = designations.get(designator);
+            if (designated == null) continue;
+            for (String pubkey : new TreeSet<>(designated)) {
+                if (relevant.add(pubkey)) relevantUsers.add(pubkey);
+            }
+        }
+        for (String pubkey : designatedUsers) {
+            if (relevant.add(pubkey)) relevantUsers.add(pubkey);
+        }
+        System.out.println("TIMING designations fetch took "
+                + (System.currentTimeMillis() - designationStartTime) / 1000.0
+                + " seconds (" + designations.size() + " designators, "
+                + relevantUsers.size() + " relevant users)");
 
         int numOfIts = (int) Math.round((double) relevantUsers.size() / BATCH_SIZE);
         System.out.println("How many Neo4j iterations: " + numOfIts);
@@ -158,9 +251,11 @@ public class GrapeRankAlgorithm {
         for (String pubkey : designatedUsers) {
             graph.pin(graph.idOf.get(pubkey));
         }
+        int penalised = applyNip05Penalties(graph, reachable, relevantUsers);
         int n = graph.size();
         System.out.println("TIMING scorecard init took "
-                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds");
+                + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds ("
+                + penalised + " NIP-05 penalties)");
 
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 
@@ -169,7 +264,6 @@ public class GrapeRankAlgorithm {
         long waitMillis = 0;
         long edgeCount = 0;
         // Each ratee is in exactly one batch, so batch order doesn't affect the CSR rows.
-        int parallelism = relationshipsCache.maxConcurrentFetches();
         List<List<String>> batches = chunked(relevantUsers, BATCH_SIZE);
         ExecutorService fetchers = Executors.newFixedThreadPool(parallelism, daemonThreads());
         try {
@@ -199,6 +293,8 @@ public class GrapeRankAlgorithm {
         } finally {
             fetchers.shutdownNow();
         }
+        // After every batch, so each ratee's designations follow its follows, mutes and reports.
+        edgeCount += addDesignations(designators, designations, graph, ratings);
 
         ScoreGraph.Csr ratingsByUser = ratings.toCsr(n);
 

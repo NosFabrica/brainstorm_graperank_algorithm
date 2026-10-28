@@ -9,6 +9,8 @@ import redis.clients.jedis.Response;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +33,13 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
             this.relationship = relationship;
         }
     }
+
+    /** Forward set: the keys a user designated in their kind-10040. */
+    private static final String DESIGNATES_PREFIX = "designates:";
+
+    /** Forward set: the key that signs a user's zap receipts (NIP-57), written by
+     * brainstorm_profile_resolver. The user chose it, so it counts as a designation. */
+    private static final String ZAPS_VIA_PREFIX = "zaps_via:";
 
     private final JedisPool pool;
 
@@ -78,6 +87,42 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
                 sets.get(ReverseSet.FOLLOWED_BY),
                 sets.get(ReverseSet.MUTED_BY),
                 sets.get(ReverseSet.REPORTED_BY));
+    }
+
+    /** `SMEMBERS designates:<pubkey>` for every designator, in one pipeline. */
+    @Override
+    public Map<String, Set<String>> getDesignationsBulk(List<String> designators) {
+        if (designators == null || designators.isEmpty()) return new HashMap<>();
+        List<Response<Set<String>>> designates = new ArrayList<>(designators.size());
+        List<Response<Set<String>>> zapsVia = new ArrayList<>(designators.size());
+        try (Jedis jedis = pool.getResource()) {
+            Pipeline pipeline = jedis.pipelined();
+            for (String pk : designators) {
+                designates.add(pipeline.smembers(DESIGNATES_PREFIX + pk));
+                zapsVia.add(pipeline.smembers(ZAPS_VIA_PREFIX + pk));
+            }
+            pipeline.sync();
+        }
+        List<Set<String>> designated = new ArrayList<>(designators.size());
+        List<Set<String>> signers = new ArrayList<>(designators.size());
+        for (int i = 0; i < designators.size(); i++) {
+            designated.add(designates.get(i).get());
+            signers.add(zapsVia.get(i).get());
+        }
+        return designationsOf(designators, designated, signers);
+    }
+
+    /** Each designator's kind-10040 keys and zap signer together; a designator with neither is absent. */
+    static Map<String, Set<String>> designationsOf(
+            List<String> designators, List<Set<String>> designated, List<Set<String>> zapSigners) {
+        Map<String, Set<String>> out = new HashMap<>();
+        for (int i = 0; i < designators.size(); i++) {
+            Set<String> keys = new HashSet<>();
+            if (designated.get(i) != null) keys.addAll(designated.get(i));
+            if (zapSigners.get(i) != null) keys.addAll(zapSigners.get(i));
+            if (!keys.isEmpty()) out.put(designators.get(i), keys);
+        }
+        return out;
     }
 
     /** `SMEMBERS` of each reverse set for every pubkey, in one pipeline on a pooled connection.

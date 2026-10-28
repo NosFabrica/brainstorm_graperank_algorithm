@@ -33,8 +33,21 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
 - **CSR (compressed sparse rows).** The incoming ratings of user `i` sit in `src[off[i] .. off[i+1])`
   (rater ids), with `ratingConfidence[]` / `rating[]` at the same positions. Followers, muters and
   reporters (for the trusted counts) use the same layout.
-- **Pinned users** — the Observer and their designated (kind-10040) keys — are seeded once and never
-  recomputed (`pinned[i]`).
+- **Pinned users** — the Observer, their designated (kind-10040) keys, and the key that signs their
+  zap receipts (`zaps_via:<observer>`, read even when the follow walk returns nothing) — are seeded
+  once and never recomputed (`pinned[i]`).
+- **Designations** — everyone else's kind-10040 keys and NIP-57 zap signers, read from the forward
+  `designates:<pubkey>` and `zaps_via:<pubkey>` sets (the latter written by brainstorm_profile_resolver)
+  for every reachable user before the graph is built — are one more rating kind (`DESIGNATE`): rating
+  `DESIGNATION_RATING` (0.95) at follow confidence, appended after each ratee's follows, mutes and
+  reports. A designated key joins the run even when no follow reaches it (hops `UNREACHABLE_HOPS`).
+
+- **NIP-05 penalties** (brainstorm_server ADR 0006) — `factor[i]` multiplies each computed Influence
+  inside the sweep: 0 for a confirmed impersonation (the domain gives the user's claimed name to another
+  key), 0.5 for a claim the domain does not back, 1 for everyone else. Inside the sweep, not on the
+  published number, so what a penalised user passes to the people they follow shrinks with it. Statuses
+  come from the follow walk's Neo4j query (`nip05_status`, written by brainstorm_profile_resolver), plus
+  one lookup for keys reached only by designation. Pinned users are never penalised.
 
 The loop updates Influence in place, so the order users are visited in, and the order of each user's
 ratings (follows → mutes → reports), change the result. Keep both as they are, or
