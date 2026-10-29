@@ -41,8 +41,9 @@ class Neo4jWriteSetTest {
     }
 
     @Test
-    void skipsAnInfluenceChangeHiddenByRounding() {
-        assertEquals(List.of(), writeSet(card(0.5012, 2, 7), new ReachableUser(2, 0.4991, 2L, 7L)));
+    void writesAnyInfluenceThatLeftTheDeadZone() {
+        // Same rounded value: still written, so the stored value follows the held one.
+        assertEquals(List.of("x"), writeSet(card(0.5012, 2, 7), new ReachableUser(2, 0.4991, 2L, 7L)));
     }
 
     @Test
@@ -96,7 +97,7 @@ class Neo4jWriteSetTest {
     }
 
     @Test
-    void writesJustAboveTheFloorAndNeverClearsIt() {
+    void theWriteSetTakesAnyScoreAboveTheFloorAndNeverClearsIt() {
         assertEquals(List.of("x"), writeSet(card(0.00011, 6, 0), null));
         assertEquals(List.of(), clearSet(card(0.00011, 6, 0), new ReachableUser(6, 0.003, 6L, 1L)));
     }

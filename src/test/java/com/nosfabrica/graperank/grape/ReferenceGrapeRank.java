@@ -388,6 +388,18 @@ final class ReferenceGrapeRank {
         long trustedStartTime = System.currentTimeMillis();
         Map<String, ScoreCard> finalScorecards = algorithmResult.getScorecards();
 
+        for (ScoreCard card : finalScorecards.values()) {
+            String pk = card.getObservee();
+            Double s = storedInfluence.get(pk);
+            double prev = s == null ? 0.0 : s;
+            if (pk.equals(observer) || designatedUsers.contains(pk)
+                    || card.getInfluence() <= Constants.PERSIST_FLOOR) continue;
+            if (Math.abs(card.getInfluence() - prev) < Constants.INFLUENCE_DEAD_ZONE) {
+                card.setInfluence(prev);
+                card.setVerified(prev > params.verifiedFollowersInfluenceCutoff());
+            }
+        }
+
         for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
             String userPubkey = entry.getKey();
             ScoreCard scoreCard = entry.getValue();

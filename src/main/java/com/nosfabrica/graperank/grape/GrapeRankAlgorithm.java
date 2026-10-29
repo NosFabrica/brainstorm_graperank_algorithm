@@ -214,6 +214,9 @@ public class GrapeRankAlgorithm {
         long algoEndTime = System.currentTimeMillis();
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 
+        // Before anything reads Influence: counts, verified, the publish diff and the write set.
+        int held = graph.holdInfluence(storedInfluence, Constants.INFLUENCE_DEAD_ZONE, Constants.PERSIST_FLOOR);
+        System.out.println("TIMING influence dead zone: held " + held + " of " + n);
 
         System.out.println("Getting trusted followers for each pubkey...");
         long trustedStartTime = System.currentTimeMillis();
@@ -285,7 +288,9 @@ public class GrapeRankAlgorithm {
     }
 
     /** Scorecards above the persist floor whose persisted fields differ from what Neo4j holds, or
-     * that Neo4j holds none for. Influence is compared at the published 2-decimal precision. */
+     * that Neo4j holds none for. Influence is compared exactly: the dead zone already returned the
+     * stored value for noise, and the stored value must follow every move past it, or the next
+     * run's dead zone would measure from a stale value and flip the cutoffs back. */
     static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored,
                                           double floor) {
         List<String> out = new ArrayList<>();
@@ -294,7 +299,7 @@ public class GrapeRankAlgorithm {
             ReachableUser prev = stored.get(card.getObservee());
             if (prev == null
                     || prev.storedInfluence() == null
-                    || Double.compare(round2(prev.storedInfluence()), round2(card.getInfluence())) != 0
+                    || Double.compare(prev.storedInfluence(), card.getInfluence()) != 0
                     || !Long.valueOf(card.getHops()).equals(prev.storedHops())
                     || !Long.valueOf(card.getTrustedFollowers()).equals(prev.storedTrustedFollowers())) {
                 out.add(card.getObservee());
@@ -316,10 +321,6 @@ public class GrapeRankAlgorithm {
             }
         }
         return out;
-    }
-
-    private static double round2(double x) {
-        return Math.round(x * 100.0) / 100.0;
     }
 
 }

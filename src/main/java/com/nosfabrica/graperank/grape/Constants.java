@@ -21,16 +21,33 @@ public class Constants {
     // everything but exact zeros). Not a preset parameter.
     public static final double PERSIST_FLOOR = persistFloor(System.getenv("INFLUENCE_PERSIST_FLOOR"));
 
+    // An Influence within this of its stored value keeps the stored value. 5x the loop-break
+    // delta: smaller moves are convergence noise, and they flip trusted-rater counts at the cutoffs.
+    // Operator override: env INFLUENCE_DEAD_ZONE (0 turns it off). Not a preset parameter.
+    public static final double INFLUENCE_DEAD_ZONE = influenceDeadZone(System.getenv("INFLUENCE_DEAD_ZONE"));
+
+    // Readers threshold stored Influence at preset cutoffs, the lowest in use 0.002 (PERMISSIVE).
     static double persistFloor(String env) {
-        if (env == null || env.isBlank()) return 0.0001;
+        return operatorInfluence("INFLUENCE_PERSIST_FLOOR", env, 0.0001, 0.001);
+    }
+
+    // Past a rank step (0.01) the published rank would lag by more than it shows.
+    static double influenceDeadZone(String env) {
+        return operatorInfluence("INFLUENCE_DEAD_ZONE", env, 0.0005, 0.01);
+    }
+
+    /** An operator-set Influence amount: unset = `fallback`; anything outside [0, maxExclusive) stops the worker. */
+    private static double operatorInfluence(String name, String env, double fallback, double maxExclusive) {
+        if (env == null || env.isBlank()) return fallback;
         double v;
         try {
             v = Double.parseDouble(env.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalStateException("INFLUENCE_PERSIST_FLOOR is not a number: " + env);
+            throw new IllegalStateException(name + " is not a number: " + env);
         }
-        // Readers threshold stored Influence at preset cutoffs, the lowest in use 0.002 (PERMISSIVE).
-        if (!(v >= 0 && v < 0.001)) throw new IllegalStateException("INFLUENCE_PERSIST_FLOOR must be in [0, 0.001): " + env);
+        if (!(v >= 0 && v < maxExclusive)) {
+            throw new IllegalStateException(name + " must be in [0, " + maxExclusive + "): " + env);
+        }
         return v;
     }
 
