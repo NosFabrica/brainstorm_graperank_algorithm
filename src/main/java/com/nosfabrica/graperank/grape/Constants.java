@@ -16,6 +16,24 @@ public class Constants {
 
     public static final double THRESHOLD_OF_LOOP_BREAK_GIVEN_MINIMUM_DELTA_INFLUENCE = 0.0001;
 
+    // Neo4j stores an Observer's scores only above this Influence: below the loop-break delta a
+    // value is indistinguishable from 0. Operator override: env INFLUENCE_PERSIST_FLOOR (0 = store
+    // everything but exact zeros). Not a preset parameter.
+    public static final double PERSIST_FLOOR = persistFloor(System.getenv("INFLUENCE_PERSIST_FLOOR"));
+
+    static double persistFloor(String env) {
+        if (env == null || env.isBlank()) return 0.0001;
+        double v;
+        try {
+            v = Double.parseDouble(env.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("INFLUENCE_PERSIST_FLOOR is not a number: " + env);
+        }
+        // Readers threshold stored Influence at preset cutoffs, the lowest in use 0.002 (PERMISSIVE).
+        if (!(v >= 0 && v < 0.001)) throw new IllegalStateException("INFLUENCE_PERSIST_FLOOR must be in [0, 0.001): " + env);
+        return v;
+    }
+
     // Follow distances beyond this are published as UNREACHABLE_HOPS.
     public static final int MAX_HOPS = 8;
     // "No follow path from the observer within the hop limit". Published as a

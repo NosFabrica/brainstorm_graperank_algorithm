@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Which scorecards the server writes to Neo4j: any persisted field that differs from
  * what Neo4j holds, or that Neo4j holds nothing for. */
@@ -22,9 +23,16 @@ class Neo4jWriteSetTest {
         return card;
     }
 
+    private static final double FLOOR = 0.0001;
+
     private static List<String> writeSet(ScoreCard card, ReachableUser stored) {
         return GrapeRankAlgorithm.neo4jWritePubkeys(
-                Map.of("x", card), stored == null ? Map.of() : Map.of("x", stored));
+                Map.of("x", card), stored == null ? Map.of() : Map.of("x", stored), FLOOR);
+    }
+
+    private static List<String> clearSet(ScoreCard card, ReachableUser stored) {
+        return GrapeRankAlgorithm.neo4jClearPubkeys(
+                Map.of("x", card), stored == null ? Map.of() : Map.of("x", stored), FLOOR);
     }
 
     @Test
@@ -54,7 +62,7 @@ class Neo4jWriteSetTest {
 
     @Test
     void writesANodeNeo4jHoldsNothingFor() {
-        assertEquals(List.of("x"), writeSet(card(0.0, 2, 0), new ReachableUser(2, null, null, null)));
+        assertEquals(List.of("x"), writeSet(card(0.5, 2, 0), new ReachableUser(2, null, null, null)));
     }
 
     @Test
@@ -69,11 +77,46 @@ class Neo4jWriteSetTest {
     }
 
     @Test
-    void aFirstRunWritesEveryScorecard() {
+    void doesNotWriteATailScoreNeo4jDoesNotHold() {
+        assertEquals(List.of(), writeSet(card(0.00005, 6, 0), null));
+        assertEquals(List.of(), writeSet(card(0.0, 6, 0), new ReachableUser(6, null, null, null)));
+        assertEquals(List.of(), clearSet(card(0.0, 6, 0), new ReachableUser(6, null, null, null)));
+    }
+
+    @Test
+    void clearsAStoredScoreThatFellToTheFloor() {
+        ReachableUser stored = new ReachableUser(6, 0.003, 6L, 1L);
+        assertEquals(List.of(), writeSet(card(0.0001, 6, 0), stored));
+        assertEquals(List.of("x"), clearSet(card(0.0001, 6, 0), stored));
+    }
+
+    @Test
+    void clearsAPartlyStoredTailNode() {
+        assertEquals(List.of("x"), clearSet(card(0.0, 6, 0), new ReachableUser(6, null, 6L, null)));
+    }
+
+    @Test
+    void writesJustAboveTheFloorAndNeverClearsIt() {
+        assertEquals(List.of("x"), writeSet(card(0.00011, 6, 0), null));
+        assertEquals(List.of(), clearSet(card(0.00011, 6, 0), new ReachableUser(6, 0.003, 6L, 1L)));
+    }
+
+    @Test
+    void floorOverrideDefaultsAndRejectsNonsense() {
+        assertEquals(0.0001, Constants.persistFloor(null));
+        assertEquals(0.0, Constants.persistFloor("0"));
+        assertThrows(IllegalStateException.class, () -> Constants.persistFloor("x"));
+        assertThrows(IllegalStateException.class, () -> Constants.persistFloor("0.001"));
+    }
+
+    @Test
+    void aFirstRunWritesEveryScorecardAboveTheFloor() {
         GrapeRankResult result = new GrapeRankAlgorithm(
                 observer -> Map.of("observer", new ReachableUser(0, null, null, null), "near", new ReachableUser(1, null, null, null)),
                 new NoEdges()).graperankAllSteps("observer");
-        assertEquals(result.getScorecards().size(), result.getNeo4jWritePubkeys().size());
+        long above = result.getScorecards().values().stream().filter(c -> c.getInfluence() > FLOOR).count();
+        assertEquals(above, result.getNeo4jWritePubkeys().size());
+        assertEquals(FLOOR, result.getNeo4jPersistFloor());
     }
 
     private static final class NoEdges implements IRelationshipsCache {
