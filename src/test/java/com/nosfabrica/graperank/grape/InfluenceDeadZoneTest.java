@@ -124,6 +124,64 @@ class InfluenceDeadZoneTest {
         assertEquals(stored, held(stored, Constants.PERSIST_FLOOR * 2));
     }
 
+    /** Observer → A → `raters` B's → TAIL. One B leaves TAIL at or below the floor; four put it
+     * between the floor and the dead zone. `tailStored` is TAIL's stored Influence, or null. */
+    private static GrapeRankResult tailRun(int raters, Double tailStored) {
+        List<String> bs = new ArrayList<>();
+        for (int i = 0; i < raters; i++) bs.add("b" + i);
+        Map<String, ReachableUser> reach = new HashMap<>();
+        reach.put(OBSERVER, new ReachableUser(0, null, null, null));
+        reach.put("a", new ReachableUser(1, null, null, null));
+        for (String b : bs) reach.put(b, new ReachableUser(2, null, null, null));
+        reach.put("tail", new ReachableUser(3, tailStored, tailStored == null ? null : 3L,
+                tailStored == null ? null : 0L));
+        IRelationshipsCache chain = new IRelationshipsCache() {
+            @Override
+            public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {
+                List<RelationshipInfo> out = new ArrayList<>();
+                if (pubkeys.contains("a")) out.add(new RelationshipInfo(OBSERVER, "FOLLOWS", "a"));
+                for (String b : bs) {
+                    if (pubkeys.contains(b)) out.add(new RelationshipInfo("a", "FOLLOWS", b));
+                    if (pubkeys.contains("tail")) out.add(new RelationshipInfo(b, "FOLLOWS", "tail"));
+                }
+                return out;
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys) {
+                return List.of();
+            }
+
+            @Override
+            public List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys) {
+                return List.of();
+            }
+        };
+        return new GrapeRankAlgorithm(observer -> reach, chain).graperankAllSteps(OBSERVER);
+    }
+
+    @Test
+    void anUnstoredTailScoreBelowTheDeadZoneIsNotStored() {
+        // Stored far off, so nothing is held: the raw computed value.
+        double computed = tailRun(4, 0.5).getScorecards().get("tail").getInfluence();
+        assertTrue(computed > Constants.PERSIST_FLOOR && computed < Constants.INFLUENCE_DEAD_ZONE);
+
+        GrapeRankResult result = tailRun(4, null);
+
+        assertEquals(0.0, result.getScorecards().get("tail").getInfluence());
+        assertTrue(!result.getNeo4jWritePubkeys().contains("tail"));
+        assertTrue(!result.getNeo4jClearPubkeys().contains("tail"));
+    }
+
+    @Test
+    void aStoredTailScoreThatFallsToTheFloorIsCleared() {
+        GrapeRankResult result = tailRun(1, 0.0003);
+
+        assertTrue(result.getScorecards().get("tail").getInfluence() <= Constants.PERSIST_FLOOR);
+        assertTrue(!result.getNeo4jWritePubkeys().contains("tail"));
+        assertEquals(List.of("tail"), result.getNeo4jClearPubkeys());
+    }
+
     @Test
     void operatorOverrideDefaultsAndRejectsNonsense() {
         assertEquals(0.0005, Constants.influenceDeadZone(null));
