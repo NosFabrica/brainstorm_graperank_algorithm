@@ -98,6 +98,32 @@ class InfluenceDeadZoneTest {
         assertEquals(1, again.getScorecards().get(SUBJECT).getTrustedFollowers());
     }
 
+    /** RATER's Influence after holding `computed` against `stored` (null = nothing stored). */
+    private static double held(Double stored, double computed) {
+        ScoreGraph graph = new ScoreGraph(OBSERVER, List.of(OBSERVER, RATER), Map.of());
+        graph.influence[graph.idOf.get(RATER)] = computed;
+        Map<String, Double> storedInfluence = new HashMap<>();
+        storedInfluence.put(RATER, stored);
+        graph.holdInfluence(storedInfluence, Constants.INFLUENCE_DEAD_ZONE, Constants.PERSIST_FLOOR);
+        return graph.influence[graph.idOf.get(RATER)];
+    }
+
+    @Test
+    void anUnstoredScoreIsHeldAtZeroUntilItReachesTheDeadZone() {
+        double below = Constants.INFLUENCE_DEAD_ZONE * 0.8;
+        assertEquals(0.0, held(null, below));
+        assertEquals(Constants.INFLUENCE_DEAD_ZONE, held(null, Constants.INFLUENCE_DEAD_ZONE));
+    }
+
+    @Test
+    void aStoredScoreFallingToTheFloorIsTakenNotHeld() {
+        double stored = Constants.PERSIST_FLOOR * 3;
+        double atFloor = Constants.PERSIST_FLOOR;
+        assertEquals(atFloor, held(stored, atFloor));
+        assertEquals(0.0, held(stored, 0.0));
+        assertEquals(stored, held(stored, Constants.PERSIST_FLOOR * 2));
+    }
+
     @Test
     void operatorOverrideDefaultsAndRejectsNonsense() {
         assertEquals(0.0005, Constants.influenceDeadZone(null));

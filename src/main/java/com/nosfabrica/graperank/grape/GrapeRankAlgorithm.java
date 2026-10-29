@@ -215,7 +215,7 @@ public class GrapeRankAlgorithm {
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 
         // Before anything reads Influence: counts, verified, the publish diff and the write set.
-        int held = graph.holdInfluence(storedInfluence, Constants.INFLUENCE_DEAD_ZONE);
+        int held = graph.holdInfluence(storedInfluence, Constants.INFLUENCE_DEAD_ZONE, Constants.PERSIST_FLOOR);
         System.out.println("TIMING influence dead zone: held " + held + " of " + n);
 
         System.out.println("Getting trusted followers for each pubkey...");

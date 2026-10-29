@@ -390,8 +390,10 @@ final class ReferenceGrapeRank {
 
         for (ScoreCard card : finalScorecards.values()) {
             String pk = card.getObservee();
-            Double prev = storedInfluence.get(pk);
-            if (pk.equals(observer) || designatedUsers.contains(pk) || prev == null) continue;
+            Double s = storedInfluence.get(pk);
+            double prev = s == null ? 0.0 : s;
+            if (pk.equals(observer) || designatedUsers.contains(pk)
+                    || card.getInfluence() <= Constants.PERSIST_FLOOR) continue;
             if (Math.abs(card.getInfluence() - prev) < Constants.INFLUENCE_DEAD_ZONE) {
                 card.setInfluence(prev);
                 card.setVerified(prev > params.verifiedFollowersInfluenceCutoff());
