@@ -230,6 +230,11 @@ class GrapeRankEquivalenceTest {
         public List<RelationshipInfo> getIncomingReportsBulk(List<String> batch) {
             return delegate.getIncomingReportsBulk(batch);
         }
+
+        @Override
+        public java.util.Map<String, java.util.Set<String>> getDesignationsBulk(List<String> designators) {
+            return delegate.getDesignationsBulk(designators);
+        }
     }
 
     // JSON prints doubles shortest-round-trip, so it is exact already; this also covers -0.0 vs 0.0.
