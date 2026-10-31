@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.neo4j.driver.*;
 import org.neo4j.driver.Record;
+import org.neo4j.driver.types.TypeSystem;
 
 public class Neo4jHelper implements IGraphDB, AutoCloseable {
 
@@ -25,30 +26,26 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
             throw new IllegalArgumentException("observer pubkey must be 64 hex chars");
         }
 
-        String influenceProp = "influence_" + observer;
-
-        // One pruning BFS for distance, reach and previous Influence. Group on the node, not on
+        // One pruning BFS for distance, reach and the stored scores. Group on the node, not on
         // its properties: grouping on `other.influence_*` returns wrong values on Neo4j 5.26.
         String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
                 "WHERE other <> user " +
                 "WITH other, min(length(p)) AS hops " +
-                "RETURN other.pubkey AS pubkey, hops, other." + influenceProp + " AS influence";
+                "RETURN other.pubkey AS pubkey, hops, " + STORED_PROPS;
 
         Map<String, ReachableUser> result = new HashMap<>();
 
         try (Session session = driver.session()) {
             List<Record> records = session.readTransaction(tx -> {
-                Result statementResult = tx.run(query, Values.parameters("pubkey", observer));
+                Result statementResult = tx.run(query, storedKeys(observer));
                 return statementResult.list();
             });
 
             if (records != null && !records.isEmpty()) {
-                result.put(observer, new ReachableUser(0, getInfluenceForPubkey(observer, influenceProp)));
+                result.put(observer, getObserver(observer));
 
                 for (Record record : records) {
-                    Value infValue = record.get("influence");
-                    Double influence = infValue.isNull() ? null : infValue.asDouble();
-                    result.put(record.get("pubkey").asString(), new ReachableUser(record.get("hops").asInt(), influence));
+                    result.put(record.get("pubkey").asString(), reachableUser(record.get("hops").asInt(), record));
                 }
             }
         }
@@ -56,17 +53,41 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
         return result;
     }
 
-    private Double getInfluenceForPubkey(String pubkey, String influenceProp) {
-        String query = "MATCH (u:NostrUser {pubkey: $pubkey}) RETURN u." + influenceProp + " AS influence LIMIT 1";
+    private ReachableUser getObserver(String observer) {
+        String query = "MATCH (other:NostrUser {pubkey: $pubkey}) RETURN " + STORED_PROPS + " LIMIT 1";
         try (Session session = driver.session()) {
             Record record = session.readTransaction(tx -> {
-                Result statementResult = tx.run(query, Values.parameters("pubkey", pubkey));
+                Result statementResult = tx.run(query, storedKeys(observer));
                 return statementResult.single();
             });
-            if (record == null) return null;
-            Value v = record.get("influence");
-            return v.isNull() ? null : v.asDouble();
+            return reachableUser(0, record);
         }
+    }
+
+    // Keys as parameters, not in the query text: one cached plan for every observer.
+    private static final String STORED_PROPS = "other[$influenceKey] AS influence, " +
+            "other[$hopsKey] AS storedHops, other[$trustedFollowersKey] AS storedTrustedFollowers";
+
+    private static Value storedKeys(String observer) {
+        return Values.parameters(
+                "pubkey", observer,
+                "influenceKey", "influence_" + observer,
+                "hopsKey", "hops_" + observer,
+                "trustedFollowersKey", "trusted_followers_" + observer);
+    }
+
+    private static ReachableUser reachableUser(int hops, Record record) {
+        Value influence = record.get("influence");
+        return new ReachableUser(
+                hops,
+                influence.isNull() ? null : influence.asDouble(),
+                storedInteger(record.get("storedHops")),
+                storedInteger(record.get("storedTrustedFollowers")));
+    }
+
+    // A float-typed value (pre-cutover workers sent counts as floats) reads as absent, so it is rewritten as an integer.
+    private static Long storedInteger(Value value) {
+        return value.hasType(TypeSystem.getDefault().INTEGER()) ? value.asLong() : null;
     }
 
     public String getNodeIdByPubkey(String pubkey) {

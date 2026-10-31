@@ -15,5 +15,7 @@ public enum ErrorCode {
     NEO4J_ERROR,
 
     /** Unclassified RuntimeException from the algorithm path — likely a bug. Fix: read stack trace and investigate. */
-    ALGORITHM_EXCEPTION;
+    ALGORITHM_EXCEPTION,
+    /** The worker running this job was lost (restart, crash, OOM) too many times; JobLease stopped re-queuing it. Fix: read the worker logs around those restarts. */
+    WORKER_LOST;
 }

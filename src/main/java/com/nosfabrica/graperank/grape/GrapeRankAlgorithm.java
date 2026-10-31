@@ -130,18 +130,18 @@ public class GrapeRankAlgorithm {
 
         long reachStartTime = System.currentTimeMillis();
         Map<String, ReachableUser> reachable = db.getReachableUsers(observer);
-        Map<String, Double> previousInfluence = new HashMap<>();
+        Map<String, Double> storedInfluence = new HashMap<>();
         Map<String, Double> userDistanceMap = new HashMap<>();
         for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
-            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            storedInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
             if (entry.getValue().hops() <= Constants.MAX_HOPS) {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }
         }
-        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
+        List<String> relevantUsers = new ArrayList<>(storedInfluence.keySet());
         Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
         for (String pubkey : designatedUsers) {
-            if (!previousInfluence.containsKey(pubkey)) {
+            if (!storedInfluence.containsKey(pubkey)) {
                 relevantUsers.add(pubkey);
             }
         }
@@ -214,6 +214,9 @@ public class GrapeRankAlgorithm {
         long algoEndTime = System.currentTimeMillis();
         System.out.println("Algorithm took " + (algoEndTime - algoStartTime) / 1000.0 + " seconds");
 
+        // Before anything reads Influence: counts, verified, the publish diff and the write set.
+        int held = graph.holdInfluence(storedInfluence, Constants.INFLUENCE_DEAD_ZONE, Constants.PERSIST_FLOOR);
+        System.out.println("TIMING influence dead zone: held " + held + " of " + n);
 
         System.out.println("Getting trusted followers for each pubkey...");
         long trustedStartTime = System.currentTimeMillis();
@@ -232,7 +235,7 @@ public class GrapeRankAlgorithm {
             double newScore = graph.influence[i];
             double newRounded = Math.round(newScore * 100.0) / 100.0;
 
-            Double prev = previousInfluence.get(pubkey);
+            Double prev = storedInfluence.get(pubkey);
             boolean hasPrev = prev != null;
             double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
 
@@ -255,18 +258,22 @@ public class GrapeRankAlgorithm {
                 + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         Map<String, ScoreCard> scorecards = graph.toScorecards(params.verifiedFollowersInfluenceCutoff());
+        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
+        List<String> neo4jClearPubkeys = neo4jClearPubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
+        System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size()
+                + ", clear set: " + neo4jClearPubkeys.size());
 
         long finalTime = System.currentTimeMillis() - startTime;
         System.out.println("Entire process took " + (finalTime) / 1000.0 + " seconds");
 
         // Graph users only: designated keys are added regardless of the graph, so an
         // Observer with no follows but a kind-10040 is still "not connected".
-        boolean success = previousInfluence.size() > 1;
+        boolean success = storedInfluence.size() > 1;
         GrapeRankError error = success
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");
 
-        return new GrapeRankResult(
+        GrapeRankResult result = new GrapeRankResult(
                 scorecards,
                 rounds,
                 finalTime / 1000.0,
@@ -274,7 +281,46 @@ public class GrapeRankAlgorithm {
                 changedScorePubkeys,
                 droppedBelowCutoffPubkeys,
                 error);
+        result.setNeo4jWritePubkeys(neo4jWritePubkeys);
+        result.setNeo4jClearPubkeys(neo4jClearPubkeys);
+        result.setNeo4jPersistFloor(Constants.PERSIST_FLOOR);
+        return result;
+    }
 
+    /** Scorecards above the persist floor whose persisted fields differ from what Neo4j holds, or
+     * that Neo4j holds none for. Influence is compared exactly: the dead zone already returned the
+     * stored value for noise, and the stored value must follow every move past it, or the next
+     * run's dead zone would measure from a stale value and flip the cutoffs back. */
+    static List<String> neo4jWritePubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored,
+                                          double floor) {
+        List<String> out = new ArrayList<>();
+        for (ScoreCard card : scorecards.values()) {
+            if (card.getInfluence() <= floor) continue;
+            ReachableUser prev = stored.get(card.getObservee());
+            if (prev == null
+                    || prev.storedInfluence() == null
+                    || Double.compare(prev.storedInfluence(), card.getInfluence()) != 0
+                    || !Long.valueOf(card.getHops()).equals(prev.storedHops())
+                    || !Long.valueOf(card.getTrustedFollowers()).equals(prev.storedTrustedFollowers())) {
+                out.add(card.getObservee());
+            }
+        }
+        return out;
+    }
+
+    /** Scorecards at or below the persist floor that Neo4j still holds any score for. */
+    static List<String> neo4jClearPubkeys(Map<String, ScoreCard> scorecards, Map<String, ReachableUser> stored,
+                                          double floor) {
+        List<String> out = new ArrayList<>();
+        for (ScoreCard card : scorecards.values()) {
+            if (card.getInfluence() > floor) continue;
+            ReachableUser prev = stored.get(card.getObservee());
+            if (prev != null && (prev.storedInfluence() != null || prev.storedHops() != null
+                    || prev.storedTrustedFollowers() != null)) {
+                out.add(card.getObservee());
+            }
+        }
+        return out;
     }
 
 }
