@@ -271,18 +271,18 @@ final class ReferenceGrapeRank {
 
         long reachStartTime = System.currentTimeMillis();
         Map<String, ReachableUser> reachable = db.getReachableUsers(observer);
-        Map<String, Double> previousInfluence = new HashMap<>();
+        Map<String, Double> storedInfluence = new HashMap<>();
         Map<String, Double> userDistanceMap = new HashMap<>();
         for (Map.Entry<String, ReachableUser> entry : reachable.entrySet()) {
-            previousInfluence.put(entry.getKey(), entry.getValue().previousInfluence());
+            storedInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
             if (entry.getValue().hops() <= Constants.MAX_HOPS) {
                 userDistanceMap.put(entry.getKey(), (double) entry.getValue().hops());
             }
         }
-        List<String> relevantUsers = new ArrayList<>(previousInfluence.keySet());
+        List<String> relevantUsers = new ArrayList<>(storedInfluence.keySet());
         Set<String> designatedUsers = designatedUsersOf(observer, designatedPubkeys);
         for (String pubkey : designatedUsers) {
-            if (!previousInfluence.containsKey(pubkey)) {
+            if (!storedInfluence.containsKey(pubkey)) {
                 relevantUsers.add(pubkey);
             }
         }
@@ -388,6 +388,18 @@ final class ReferenceGrapeRank {
         long trustedStartTime = System.currentTimeMillis();
         Map<String, ScoreCard> finalScorecards = algorithmResult.getScorecards();
 
+        for (ScoreCard card : finalScorecards.values()) {
+            String pk = card.getObservee();
+            Double s = storedInfluence.get(pk);
+            double prev = s == null ? 0.0 : s;
+            if (pk.equals(observer) || designatedUsers.contains(pk)
+                    || card.getInfluence() <= Constants.PERSIST_FLOOR) continue;
+            if (Math.abs(card.getInfluence() - prev) < Constants.INFLUENCE_DEAD_ZONE) {
+                card.setInfluence(prev);
+                card.setVerified(prev > params.verifiedFollowersInfluenceCutoff());
+            }
+        }
+
         for (Map.Entry<String, ScoreCard> entry : finalScorecards.entrySet()) {
             String userPubkey = entry.getKey();
             ScoreCard scoreCard = entry.getValue();
@@ -410,7 +422,7 @@ final class ReferenceGrapeRank {
             double newScore = entry.getValue().getInfluence();
             double newRounded = Math.round(newScore * 100.0) / 100.0;
 
-            Double prev = previousInfluence.get(pubkey);
+            Double prev = storedInfluence.get(pubkey);
             boolean hasPrev = prev != null;
             double prevRounded = hasPrev ? Math.round(prev * 100.0) / 100.0 : 0.0;
 
@@ -433,7 +445,7 @@ final class ReferenceGrapeRank {
 
         // Graph users only: designated keys are added regardless of the graph, so an
         // Observer with no follows but a kind-10040 is still "not connected".
-        boolean success = previousInfluence.size() > 1;
+        boolean success = storedInfluence.size() > 1;
         GrapeRankError error = success
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");

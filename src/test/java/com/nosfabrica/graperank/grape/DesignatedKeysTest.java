@@ -61,7 +61,7 @@ class DesignatedKeysTest {
      * added regardless of the graph and must not turn that into a success. */
     @Test
     void doesNotMakeAnUnconnectedObserverSucceed() {
-        IGraphDB emptyGraph = observer -> Map.of(OBSERVER, new ReachableUser(0, 1.0));
+        IGraphDB emptyGraph = observer -> Map.of(OBSERVER, new ReachableUser(0, 1.0, null, null));
         IRelationshipsCache noEdges = new IRelationshipsCache() {
             @Override
             public List<RelationshipInfo> getIncomingFollowsBulk(List<String> pubkeys) {

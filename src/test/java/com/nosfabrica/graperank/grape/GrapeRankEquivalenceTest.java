@@ -46,14 +46,14 @@ class GrapeRankEquivalenceTest {
 
         Map<String, ReachableUser> reachable = new HashMap<>();
         if (connected) {
-            reachable.put(observer, new ReachableUser(0, random.nextBoolean() ? 1.0 : null));
+            reachable.put(observer, new ReachableUser(0, random.nextBoolean() ? 1.0 : null, null, null));
             for (int i = 1; i < users; i++) {
                 int hops = 1 + random.nextInt(Constants.MAX_HOPS + 2);
                 double roll = random.nextDouble();
                 Double previous = roll < 0.3 ? null
                         : roll < 0.5 ? PREVIOUS_ON_ROUNDING_EDGES[random.nextInt(PREVIOUS_ON_ROUNDING_EDGES.length)]
                         : random.nextDouble();
-                reachable.put(pubkeys.get(i), new ReachableUser(hops, previous));
+                reachable.put(pubkeys.get(i), new ReachableUser(hops, previous, null, null));
             }
         }
 

@@ -15,6 +15,12 @@ public class GrapeRankResult {
     private boolean success = false;
     private List<String> changedScorePubkeys = Collections.emptyList();
     private List<String> droppedBelowCutoffPubkeys = Collections.emptyList();
+    // Null = not computed; the server then writes every scorecard.
+    private List<String> neo4jWritePubkeys;
+    // Stored scores now at or below the persist floor: the server clears them.
+    private List<String> neo4jClearPubkeys = Collections.emptyList();
+    // Null = an older worker: no floor, the server writes every scorecard in full mode.
+    private Double neo4jPersistFloor;
     private GrapeRankError error;
 
     public GrapeRankResult(Map<String, ScoreCard> scorecards, Integer rounds, double durationSeconds, boolean success) {
@@ -59,6 +65,30 @@ public class GrapeRankResult {
 
     public void setDroppedBelowCutoffPubkeys(List<String> droppedBelowCutoffPubkeys) {
         this.droppedBelowCutoffPubkeys = droppedBelowCutoffPubkeys;
+    }
+
+    public List<String> getNeo4jWritePubkeys() {
+        return neo4jWritePubkeys;
+    }
+
+    public void setNeo4jWritePubkeys(List<String> neo4jWritePubkeys) {
+        this.neo4jWritePubkeys = neo4jWritePubkeys;
+    }
+
+    public List<String> getNeo4jClearPubkeys() {
+        return neo4jClearPubkeys;
+    }
+
+    public void setNeo4jClearPubkeys(List<String> neo4jClearPubkeys) {
+        this.neo4jClearPubkeys = neo4jClearPubkeys;
+    }
+
+    public Double getNeo4jPersistFloor() {
+        return neo4jPersistFloor;
+    }
+
+    public void setNeo4jPersistFloor(Double neo4jPersistFloor) {
+        this.neo4jPersistFloor = neo4jPersistFloor;
     }
 
     public Map<String, ScoreCard> getScorecards() {
