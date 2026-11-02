@@ -42,6 +42,12 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   `DESIGNATION_RATING` (0.95) at follow confidence, appended after each ratee's follows, mutes and
   reports. A designated key joins the run even when no follow reaches it (hops `UNREACHABLE_HOPS`).
 
+- **Vouches** — the reverse `vouched_by:<pubkey>` sets (written by brainstorm_server from kind-30003
+  `d="vouches"` list events) are one more rating kind (`VOUCH`): `vouchRating` at `vouchConfidence`,
+  appended after each ratee's follows, mutes and reports. A vouch only counts when both voucher and
+  vouched are already in the candidate set — vouching never extends reach, so it can't be used to
+  inject strangers into the run — and it counts toward none of the trusted-rater counts.
+
 - **NIP-05 penalties** (brainstorm_server ADR 0006) — `factor[i]` multiplies each computed Influence
   inside the sweep: 0 for a confirmed impersonation (the domain gives the user's claimed name to another
   key), 0.5 for a claim the domain does not back, 1 for everyone else. Inside the sweep, not on the

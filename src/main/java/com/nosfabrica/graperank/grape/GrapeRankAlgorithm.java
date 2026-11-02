@@ -58,6 +58,7 @@ public class GrapeRankAlgorithm {
                         : ScoreGraph.FOLLOW;
                 case "MUTES" -> ScoreGraph.MUTE;
                 case "REPORTS" -> ScoreGraph.REPORT;
+                case "VOUCHES" -> ScoreGraph.VOUCH;
                 default -> throw new UnknownRelationshipException(rel.getRelationship());
             };
             ratings.add(ratee, rater, kind);
@@ -285,15 +286,18 @@ public class GrapeRankAlgorithm {
                 fetchMillis += timed.fetchMillis();
                 IncomingRelationships incoming = timed.incoming();
 
-                // Per ratee the sweep sums follows, then mutes, then reports; the order is part of the result.
+                // Per ratee the sweep sums follows, then mutes, then reports, then vouches;
+                // the order is part of the result.
                 edgeCount += addRatings(incoming.follows(), graph, ratings);
                 edgeCount += addRatings(incoming.mutes(), graph, ratings);
                 edgeCount += addRatings(incoming.reports(), graph, ratings);
+                edgeCount += addRatings(incoming.vouches(), graph, ratings);
             }
         } finally {
             fetchers.shutdownNow();
         }
-        // After every batch, so each ratee's designations follow its follows, mutes and reports.
+        // After every batch, so each ratee's designations follow its follows, mutes, reports
+        // and vouches.
         edgeCount += addDesignations(designators, designations, graph, ratings);
 
         ScoreGraph.Csr ratingsByUser = ratings.toCsr(n);
