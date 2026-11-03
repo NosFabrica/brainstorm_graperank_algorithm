@@ -105,17 +105,25 @@ public class GrapeRankAlgorithm {
         return designations;
     }
 
-    /** Each relevant user's NIP-05 penalty (ADR 0006): from the follow walk for users it reached,
-     * from one lookup for the rest (keys reached only by designation). Returns how many apply. */
-    private int applyNip05Penalties(ScoreGraph graph, Map<String, ReachableUser> reachable, List<String> relevantUsers) {
-        Map<String, String> statuses = new HashMap<>();
+    /** The follow walk's users plus what Neo4j holds for the relevant users it did not reach
+     * (keys reached only by designation), so every diff against Neo4j sees their stored scores. */
+    private Map<String, ReachableUser> withUnreached(
+            String observer, Map<String, ReachableUser> reachable, List<String> relevantUsers) {
         List<String> unreached = new ArrayList<>();
+        for (String pubkey : relevantUsers) if (!reachable.containsKey(pubkey)) unreached.add(pubkey);
+        Map<String, ReachableUser> stored = new HashMap<>(reachable);
+        for (List<String> batch : chunked(unreached, BATCH_SIZE)) stored.putAll(db.getUnreachedUsers(observer, batch));
+        return stored;
+    }
+
+    /** Each relevant user's NIP-05 penalty (ADR 0006), from the follow walk for users it reached
+     * and the unreached lookup for the rest. Returns how many apply. */
+    private int applyNip05Penalties(ScoreGraph graph, Map<String, ReachableUser> stored, List<String> relevantUsers) {
+        Map<String, String> statuses = new HashMap<>();
         for (String pubkey : relevantUsers) {
-            ReachableUser user = reachable.get(pubkey);
-            if (user == null) unreached.add(pubkey);
-            else if (user.nip05Status() != null) statuses.put(pubkey, user.nip05Status());
+            ReachableUser user = stored.get(pubkey);
+            if (user != null && user.nip05Status() != null) statuses.put(pubkey, user.nip05Status());
         }
-        for (List<String> batch : chunked(unreached, BATCH_SIZE)) statuses.putAll(db.getPenalisedNip05Statuses(batch));
         int applied = 0;
         for (Map.Entry<String, String> entry : statuses.entrySet()) {
             double f = Constants.nip05Factor(entry.getValue());
@@ -247,14 +255,20 @@ public class GrapeRankAlgorithm {
         System.out.println("How many Neo4j iterations: " + numOfIts);
 
         long initStartTime = System.currentTimeMillis();
+        Map<String, ReachableUser> stored = withUnreached(observer, reachable, relevantUsers);
+        for (Map.Entry<String, ReachableUser> entry : stored.entrySet()) {
+            if (!reachable.containsKey(entry.getKey())) storedInfluence.put(entry.getKey(), entry.getValue().storedInfluence());
+        }
         ScoreGraph graph = new ScoreGraph(observer, relevantUsers, userDistanceMap);
         for (String pubkey : designatedUsers) {
             graph.pin(graph.idOf.get(pubkey));
         }
-        int penalised = applyNip05Penalties(graph, reachable, relevantUsers);
+        int penalised = applyNip05Penalties(graph, stored, relevantUsers);
         int n = graph.size();
         System.out.println("TIMING scorecard init took "
                 + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds ("
+                + (relevantUsers.size() - reachable.size()) + " unreached, "
+                + (stored.size() - reachable.size()) + " of them stored, "
                 + penalised + " NIP-05 penalties)");
 
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
@@ -354,8 +368,8 @@ public class GrapeRankAlgorithm {
                 + (System.currentTimeMillis() - diffStartTime) / 1000.0 + " seconds");
 
         Map<String, ScoreCard> scorecards = graph.toScorecards(params.verifiedFollowersInfluenceCutoff());
-        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
-        List<String> neo4jClearPubkeys = neo4jClearPubkeys(scorecards, reachable, Constants.PERSIST_FLOOR);
+        List<String> neo4jWritePubkeys = neo4jWritePubkeys(scorecards, stored, Constants.PERSIST_FLOOR);
+        List<String> neo4jClearPubkeys = neo4jClearPubkeys(scorecards, stored, Constants.PERSIST_FLOOR);
         System.out.println("TIMING neo4j write set: " + neo4jWritePubkeys.size() + " of " + scorecards.size()
                 + ", clear set: " + neo4jClearPubkeys.size());
 
@@ -364,7 +378,7 @@ public class GrapeRankAlgorithm {
 
         // Graph users only: designated keys are added regardless of the graph, so an
         // Observer with no follows but a kind-10040 is still "not connected".
-        boolean success = storedInfluence.size() > 1;
+        boolean success = reachable.size() > 1;
         GrapeRankError error = success
                 ? null
                 : new GrapeRankError(ErrorCode.NO_ELIGIBLE_USERS, "Observer is not connected to any other users in the graph");

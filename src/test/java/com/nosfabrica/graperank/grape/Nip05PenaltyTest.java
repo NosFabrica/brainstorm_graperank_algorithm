@@ -52,9 +52,13 @@ class Nip05PenaltyTest {
             }
 
             @Override
-            public Map<String, String> getPenalisedNip05Statuses(Collection<String> pubkeys) {
-                Map<String, String> out = new HashMap<>();
-                for (String pubkey : pubkeys) if (unreachedStatuses.containsKey(pubkey)) out.put(pubkey, unreachedStatuses.get(pubkey));
+            public Map<String, ReachableUser> getUnreachedUsers(String observer, Collection<String> pubkeys) {
+                Map<String, ReachableUser> out = new HashMap<>();
+                for (String pubkey : pubkeys) {
+                    if (unreachedStatuses.containsKey(pubkey)) {
+                        out.put(pubkey, new ReachableUser(999, null, unreachedStatuses.get(pubkey)));
+                    }
+                }
                 return out;
             }
         };
