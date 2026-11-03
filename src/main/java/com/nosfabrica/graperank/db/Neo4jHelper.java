@@ -55,16 +55,22 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
     }
 
     @Override
-    public Map<String, String> getPenalisedNip05Statuses(Collection<String> pubkeys) {
-        Map<String, String> result = new HashMap<>();
+    public Map<String, ReachableUser> getUnreachedUsers(String observer, Collection<String> pubkeys) {
+        Map<String, ReachableUser> result = new HashMap<>();
         if (pubkeys == null || pubkeys.isEmpty()) return result;
-        String query = "UNWIND $pubkeys AS pk MATCH (u:NostrUser {pubkey: pk}) " +
-                "WHERE u.nip05_status IN $penalised RETURN u.pubkey AS pubkey, u.nip05_status AS status";
+        String query = "UNWIND $pubkeys AS pk MATCH (other:NostrUser {pubkey: pk}) " +
+                "WHERE other[$influenceKey] IS NOT NULL OR other[$hopsKey] IS NOT NULL " +
+                "OR other[$trustedFollowersKey] IS NOT NULL OR other.nip05_status IN $penalised " +
+                "RETURN other.pubkey AS pubkey, " + STORED_PROPS;
+        Map<String, Object> params = new HashMap<>(storedKeys(observer).asMap());
+        params.put("pubkeys", List.copyOf(pubkeys));
+        params.put("penalised", List.copyOf(com.nosfabrica.graperank.grape.Constants.PENALISED_NIP05_STATUSES));
+        int unreachable = (int) com.nosfabrica.graperank.grape.Constants.UNREACHABLE_HOPS;
         try (Session session = driver.session()) {
-            List<Record> records = session.readTransaction(tx -> tx.run(query, Values.parameters(
-                    "pubkeys", List.copyOf(pubkeys),
-                    "penalised", List.copyOf(com.nosfabrica.graperank.grape.Constants.PENALISED_NIP05_STATUSES))).list());
-            for (Record record : records) result.put(record.get("pubkey").asString(), record.get("status").asString());
+            List<Record> records = session.readTransaction(tx -> tx.run(query, params).list());
+            for (Record record : records) {
+                result.put(record.get("pubkey").asString(), reachableUser(unreachable, record));
+            }
         }
         return result;
     }
