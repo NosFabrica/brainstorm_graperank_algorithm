@@ -92,10 +92,11 @@ final class ScoreGraph {
         final byte[] kind = ratings.kind;
         final double[] ratingConfidence = {
                 params.followConfidence(), params.followConfidenceOfObserver(),
-                params.muteConfidence(), params.reportConfidence(), params.followConfidence()};
+                params.muteConfidence(), params.reportConfidence(), params.followConfidence(),
+                params.vouchConfidence()};
         final double[] rating = {
                 params.followRating(), params.followRating(), params.muteRating(), params.reportRating(),
-                Constants.DESIGNATION_RATING};
+                Constants.DESIGNATION_RATING, params.vouchRating()};
         final double attenuation = params.attenuationFactor();
         final double rigor = params.rigor();
         int rounds = 0;
@@ -154,12 +155,12 @@ final class ScoreGraph {
 
     /** Per ratee, how many followers / muters / reporters clear their preset cutoff — held
      * Influence ({@link #holdInfluence}), strict `>`. The Observer's own follows count as follows;
-     * designations count as none of them. */
+     * designations and vouches count as none of them. */
     void countTrustedRaters(Csr ratings, GrapeRankParams params) {
         double[] cutoff = {
                 params.verifiedFollowersInfluenceCutoff(), params.verifiedFollowersInfluenceCutoff(),
                 params.verifiedMutersInfluenceCutoff(), params.verifiedReportersInfluenceCutoff(),
-                Double.POSITIVE_INFINITY};
+                Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
         int n = pubkeys.length;
         trustedFollowers = new double[n];
         trustedMuters = new double[n];
@@ -207,6 +208,7 @@ final class ScoreGraph {
     static final byte MUTE = 2;
     static final byte REPORT = 3;
     static final byte DESIGNATE = 4;
+    static final byte VOUCH = 5;
 
     /** Compressed sparse rows: row `i`'s edges are `src[off[i] .. off[i + 1])`, with each edge's kind
      * at the same position. */
