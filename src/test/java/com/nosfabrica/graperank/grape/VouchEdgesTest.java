@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Vouches (kind 30003, d=\"vouches\"): a deliberate endorsement, carried at
+ * Vouches (kind 30000, d=\"vouches\"): a deliberate endorsement, carried at
  * {@code vouchRating} / {@code vouchConfidence} instead of the follow's ambient
  * rating and confidence. A vouch moves a user's Influence but never extends the
  * candidate set, and counts as none of the trusted-rater counts — like a

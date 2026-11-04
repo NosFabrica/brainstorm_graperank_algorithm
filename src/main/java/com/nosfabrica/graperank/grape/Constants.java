@@ -11,7 +11,7 @@ public class Constants {
     public static final double DEFAULT_CONFIDENCE_FOR_MUTE = 0.5; // [0,1]
     public static final double DEFAULT_CONFIDENCE_FOR_REPORT = 0.5; // [0,1]
 
-    // A vouch is a deliberate, reputationally costly endorsement (kind 30003, d="vouches"),
+    // A vouch is a deliberate, reputationally costly endorsement (kind 30000, d="vouches"),
     // not ambient attention like a follow: full positive rating, and an edge confidence an
     // order of magnitude above a bare follow's — still below the Observer's own follow.
     public static final double DEFAULT_RATING_FOR_VOUCH = 1.0;

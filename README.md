@@ -42,7 +42,7 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   `DESIGNATION_RATING` (0.95) at follow confidence, appended after each ratee's follows, mutes and
   reports. A designated key joins the run even when no follow reaches it (hops `UNREACHABLE_HOPS`).
 
-- **Vouches** — the reverse `vouched_by:<pubkey>` sets (written by brainstorm_server from kind-30003
+- **Vouches** — the reverse `vouched_by:<pubkey>` sets (written by brainstorm_server from kind-30000
   `d="vouches"` list events) are one more rating kind (`VOUCH`): `vouchRating` at `vouchConfidence`,
   appended after each ratee's follows, mutes and reports. A vouch only counts when both voucher and
   vouched are already in the candidate set — vouching never extends reach, so it can't be used to
