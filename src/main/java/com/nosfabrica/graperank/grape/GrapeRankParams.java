@@ -14,5 +14,7 @@ public record GrapeRankParams(
         @JsonProperty(required = true) double followConfidenceOfObserver,
         @JsonProperty(required = true) double verifiedFollowersInfluenceCutoff,
         @JsonProperty(required = true) double verifiedReportersInfluenceCutoff,
-        @JsonProperty(required = true) double verifiedMutersInfluenceCutoff
+        @JsonProperty(required = true) double verifiedMutersInfluenceCutoff,
+        @JsonProperty(required = true) double vouchRating,
+        @JsonProperty(required = true) double vouchConfidence
 ) {}

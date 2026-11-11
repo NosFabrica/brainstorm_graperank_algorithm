@@ -11,6 +11,12 @@ public class Constants {
     public static final double DEFAULT_CONFIDENCE_FOR_MUTE = 0.5; // [0,1]
     public static final double DEFAULT_CONFIDENCE_FOR_REPORT = 0.5; // [0,1]
 
+    // A vouch is a deliberate, reputationally costly endorsement (kind 30000, d="vouches"),
+    // not ambient attention like a follow: full positive rating, and an edge confidence an
+    // order of magnitude above a bare follow's — still below the Observer's own follow.
+    public static final double DEFAULT_RATING_FOR_VOUCH = 1.0;
+    public static final double DEFAULT_CONFIDENCE_FOR_VOUCH = 0.4; // [0,1]
+
     public static final double GLOBAL_ATTENUATION_FACTOR = 0.85; // [0,1]
     public static final double GLOBAL_RIGOR = 0.5; // [0,1]
 
@@ -100,6 +106,8 @@ public class Constants {
             DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER,
             DEFAULT_CUTOFF_OF_VALID_USER,
             DEFAULT_CUTOFF_OF_TRUSTED_REPORTER,
-            DEFAULT_CUTOFF_OF_VERIFIED_MUTER
+            DEFAULT_CUTOFF_OF_VERIFIED_MUTER,
+            DEFAULT_RATING_FOR_VOUCH,
+            DEFAULT_CONFIDENCE_FOR_VOUCH
     );
 }

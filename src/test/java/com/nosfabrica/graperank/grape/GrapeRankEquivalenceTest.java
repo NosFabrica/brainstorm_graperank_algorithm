@@ -251,6 +251,6 @@ class GrapeRankEquivalenceTest {
     }
 
     private static GrapeRankParams customParams() {
-        return new GrapeRankParams(0.3, 0.7, 1.0, 0.05, -0.2, 0.4, -0.3, 0.6, 0.8, 0.05, 0.2, 0.03);
+        return new GrapeRankParams(0.3, 0.7, 1.0, 0.05, -0.2, 0.4, -0.3, 0.6, 0.8, 0.05, 0.2, 0.03, 0.9, 0.35);
     }
 }
