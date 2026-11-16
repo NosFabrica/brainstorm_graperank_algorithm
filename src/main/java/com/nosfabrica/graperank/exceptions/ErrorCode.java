@@ -17,5 +17,9 @@ public enum ErrorCode {
     /** Unclassified RuntimeException from the algorithm path — likely a bug. Fix: read stack trace and investigate. */
     ALGORITHM_EXCEPTION,
     /** The worker running this job was lost (restart, crash, OOM) too many times; JobLease stopped re-queuing it. Fix: read the worker logs around those restarts. */
-    WORKER_LOST;
+    WORKER_LOST,
+    /** The Observer's own key is marked compromised (brainstorm_server compromised_pubkey): its perspective is
+     * whoever holds the key now, so the run is refused. Fix: none — the server stops queuing it; this catches one
+     * queued before the marking. */
+    COMPROMISED_OBSERVER;
 }

@@ -25,7 +25,8 @@ final class ScoreGraph {
     final double[] confidence;
     final double[] influence;
     final boolean[] pinned;
-    /** Multiplies each computed Influence: the NIP-05 penalty, 1.0 for nearly everyone. */
+    /** Multiplies each computed Influence: the NIP-05 penalty or a compromised key's 0, 1.0 for
+     * nearly everyone. */
     final double[] factor;
 
     double[] trustedFollowers;
@@ -83,6 +84,19 @@ final class ScoreGraph {
      * Observer designated — are the Observer's own choice and are never scaled. */
     void penalize(int id, double f) {
         if (!pinned[id]) factor[id] = f;
+    }
+
+    /** A compromised key (brainstorm_server `compromised_pubkey`): Influence 0 from the first
+     * sweep and every round after, so nothing it rates — follows, mutes, reports, designations —
+     * carries any weight. Unlike {@link #penalize}, it overrides a designation pin: whoever holds
+     * the key now is not who the Observer designated. */
+    void compromise(int id) {
+        pinned[id] = false;
+        averageScore[id] = 0.0;
+        input[id] = 0.0;
+        confidence[id] = 0.0;
+        influence[id] = 0.0;
+        factor[id] = 0.0;
     }
 
     /** Sweep until no Influence moves by more than the loop-break threshold. Returns rounds. */

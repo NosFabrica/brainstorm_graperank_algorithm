@@ -153,20 +153,6 @@ public class Main {
         return mapper.treeToValue(paramsNode, GrapeRankParams.class);
     }
 
-    /** Optional: the pubkeys in the Observer's kind-10040. Absent or malformed
-     * means none — designation is an addition to the run, never a reason to fail it. */
-    private static List<String> resolveDesignatedPubkeys(JsonNode node) {
-        List<String> pubkeys = new ArrayList<>();
-        if (node != null && node.isArray()) {
-            for (JsonNode item : node) {
-                if (item.isTextual()) {
-                    pubkeys.add(item.asText());
-                }
-            }
-        }
-        return pubkeys;
-    }
-
     private static boolean pushFailureResult(Jedis redis, int privateId, GrapeRankError error) {
         try {
             GrapeRankResult failure = new GrapeRankResult(null, null, 0.0, false, error);
@@ -214,10 +200,18 @@ public class Main {
                 return pushFailureResult(redis, privateId, new GrapeRankError(ErrorCode.MALFORMED_PARAMS, e.getMessage()));
             }
 
-            List<String> designatedPubkeys = resolveDesignatedPubkeys(parsed.get("designated_pubkeys"));
+            List<String> designatedPubkeys = RequestFields.pubkeys(parsed, "designated_pubkeys");
+            // Keys brainstorm_server marks compromised: held at Influence 0. Absent from an older server.
+            List<String> compromisedPubkeys = RequestFields.pubkeys(parsed, "compromised_pubkeys");
+            if (RequestFields.observerIsCompromised(observer, compromisedPubkeys)) {
+                System.err.println("Observer " + observer + " is compromised, refusing privateId " + privateId);
+                return pushFailureResult(redis, privateId, new GrapeRankError(ErrorCode.COMPROMISED_OBSERVER,
+                        "The Observer's key is marked compromised"));
+            }
 
             System.out.println("Processing message: " + privateId
-                    + " (" + designatedPubkeys.size() + " designated keys)");
+                    + " (" + designatedPubkeys.size() + " designated keys, "
+                    + compromisedPubkeys.size() + " compromised keys)");
 
             processJobStarted(privateId);
 
@@ -225,7 +219,7 @@ public class Main {
             GrapeRankResult result;
             try {
                 GrapeRankAlgorithm helper = new GrapeRankAlgorithm(neo4jHelper, relationshipsCache);
-                result = helper.graperankAllSteps(observer, params, designatedPubkeys);
+                result = helper.graperankAllSteps(observer, params, designatedPubkeys, compromisedPubkeys);
             } catch (Exception e) {
                 System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
                 e.printStackTrace();
