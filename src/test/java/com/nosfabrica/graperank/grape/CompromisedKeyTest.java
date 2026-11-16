@@ -24,7 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * designated it.
  *
  * OBSERVER follows STOLEN and BYSTANDER (and FRIEND, who follows BYSTANDER too). STOLEN follows
- * SYBIL, which nobody else follows; optionally STOLEN reports BYSTANDER, and designates PROVIDER.
+ * SYBIL, which nobody else follows; optionally STOLEN reports or mutes BYSTANDER (`stolenRates`),
+ * and it designates PROVIDER.
  */
 class CompromisedKeyTest {
 
@@ -36,7 +37,7 @@ class CompromisedKeyTest {
     private static final String PROVIDER = "provider";
 
     private static Map<String, ScoreCard> run(
-            Collection<String> compromised, boolean stolenReportsBystander, List<String> designatedByObserver) {
+            Collection<String> compromised, String stolenRates, List<String> designatedByObserver) {
         IGraphDB graph = new IGraphDB() {
             @Override
             public Map<String, ReachableUser> getReachableUsers(String observer) {
@@ -70,12 +71,15 @@ class CompromisedKeyTest {
 
             @Override
             public List<RelationshipInfo> getIncomingMutesBulk(List<String> pubkeys) {
+                if ("MUTES".equals(stolenRates) && pubkeys.contains(BYSTANDER)) {
+                    return List.of(new RelationshipInfo(STOLEN, "MUTES", BYSTANDER));
+                }
                 return List.of();
             }
 
             @Override
             public List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys) {
-                if (stolenReportsBystander && pubkeys.contains(BYSTANDER)) {
+                if ("REPORTS".equals(stolenRates) && pubkeys.contains(BYSTANDER)) {
                     return List.of(new RelationshipInfo(STOLEN, "REPORTS", BYSTANDER));
                 }
                 return List.of();
@@ -94,7 +98,7 @@ class CompromisedKeyTest {
     }
 
     private static Map<String, ScoreCard> run(Collection<String> compromised) {
-        return run(compromised, false, List.of());
+        return run(compromised, null, List.of());
     }
 
     @Test
@@ -110,15 +114,27 @@ class CompromisedKeyTest {
     }
 
     @Test
-    void itsReportsCostNothing() {
-        Map<String, ScoreCard> clean = run(Set.of(STOLEN), false, List.of());
-        Map<String, ScoreCard> reported = run(Set.of(STOLEN), true, List.of());
-        Map<String, ScoreCard> reportedByLiveKey = run(Set.of(), true, List.of());
+    void itsReportsAndMutesCostNothing() {
+        for (String kind : List.of("REPORTS", "MUTES")) {
+            Map<String, ScoreCard> clean = run(Set.of(STOLEN), null, List.of());
+            Map<String, ScoreCard> rated = run(Set.of(STOLEN), kind, List.of());
+            Map<String, ScoreCard> ratedByLiveKey = run(Set.of(), kind, List.of());
 
-        assertTrue(reportedByLiveKey.get(BYSTANDER).getInfluence()
-                        < run(Set.of(), false, List.of()).get(BYSTANDER).getInfluence(),
-                "the fixture's report costs something from a live key");
-        assertEquals(clean.get(BYSTANDER).getInfluence(), reported.get(BYSTANDER).getInfluence(), 1e-12);
+            assertTrue(ratedByLiveKey.get(BYSTANDER).getInfluence()
+                            < run(Set.of(), null, List.of()).get(BYSTANDER).getInfluence(),
+                    "the fixture's " + kind + " costs something from a live key");
+            assertEquals(clean.get(BYSTANDER).getInfluence(), rated.get(BYSTANDER).getInfluence(), 1e-12, kind);
+        }
+    }
+
+    @Test
+    void itCountsTowardNobodysTrustedFollowersMutersOrReporters() {
+        assertEquals(1, run(Set.of()).get(SYBIL).getTrustedFollowers(), "a live key is a trusted follower");
+        assertEquals(0, run(Set.of(STOLEN)).get(SYBIL).getTrustedFollowers());
+        assertEquals(1, run(Set.of(), "MUTES", List.of()).get(BYSTANDER).getTrustedMuters());
+        assertEquals(0, run(Set.of(STOLEN), "MUTES", List.of()).get(BYSTANDER).getTrustedMuters());
+        assertEquals(1, run(Set.of(), "REPORTS", List.of()).get(BYSTANDER).getTrustedReporters());
+        assertEquals(0, run(Set.of(STOLEN), "REPORTS", List.of()).get(BYSTANDER).getTrustedReporters());
     }
 
     @Test
@@ -132,8 +148,8 @@ class CompromisedKeyTest {
 
     @Test
     void itOverridesTheObserversDesignationPin() {
-        Map<String, ScoreCard> pinned = run(Set.of(), false, List.of(STOLEN));
-        Map<String, ScoreCard> scored = run(Set.of(STOLEN), false, List.of(STOLEN));
+        Map<String, ScoreCard> pinned = run(Set.of(), null, List.of(STOLEN));
+        Map<String, ScoreCard> scored = run(Set.of(STOLEN), null, List.of(STOLEN));
 
         assertEquals(Constants.DESIGNATED_KEY_INFLUENCE, pinned.get(STOLEN).getInfluence());
         assertEquals(0.0, scored.get(STOLEN).getInfluence());

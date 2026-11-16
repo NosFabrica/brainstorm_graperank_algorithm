@@ -54,8 +54,11 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   sweep (`ScoreGraph.compromise`): factor 0, so nothing they rate — follows, mutes, reports,
   designations — carries weight, and they count toward nobody's trusted followers, muters or
   reporters. Unlike a NIP-05 penalty this overrides a designation pin: whoever holds the key now is
-  not who the Observer designated. The Observer itself is never zeroed. A request without the field
-  (an older server) zeroes nothing.
+  not who the Observer designated. A run whose Observer is on the list is refused
+  (`COMPROMISED_OBSERVER`): its perspective is whoever holds the key now. brainstorm_server also cuts
+  the key's own follows, mutes, reports and designations from Neo4j and Redis when it is marked, so
+  the follow walk stops at it. A request without the field (an older server) zeroes nothing; a
+  malformed one zeroes nothing and is logged.
 
 The loop updates Influence in place, so the order users are visited in, and the order of each user's
 ratings (follows → mutes → reports), change the result. Keep both as they are, or
