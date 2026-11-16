@@ -155,7 +155,7 @@ public class Main {
 
     /** Optional: the pubkeys in the Observer's kind-10040. Absent or malformed
      * means none — designation is an addition to the run, never a reason to fail it. */
-    private static List<String> resolveDesignatedPubkeys(JsonNode node) {
+    private static List<String> resolvePubkeys(JsonNode node) {
         List<String> pubkeys = new ArrayList<>();
         if (node != null && node.isArray()) {
             for (JsonNode item : node) {
@@ -214,10 +214,13 @@ public class Main {
                 return pushFailureResult(redis, privateId, new GrapeRankError(ErrorCode.MALFORMED_PARAMS, e.getMessage()));
             }
 
-            List<String> designatedPubkeys = resolveDesignatedPubkeys(parsed.get("designated_pubkeys"));
+            List<String> designatedPubkeys = resolvePubkeys(parsed.get("designated_pubkeys"));
+            // Keys brainstorm_server marks compromised: held at Influence 0. Absent from an older server.
+            List<String> compromisedPubkeys = resolvePubkeys(parsed.get("compromised_pubkeys"));
 
             System.out.println("Processing message: " + privateId
-                    + " (" + designatedPubkeys.size() + " designated keys)");
+                    + " (" + designatedPubkeys.size() + " designated keys, "
+                    + compromisedPubkeys.size() + " compromised keys)");
 
             processJobStarted(privateId);
 
@@ -225,7 +228,7 @@ public class Main {
             GrapeRankResult result;
             try {
                 GrapeRankAlgorithm helper = new GrapeRankAlgorithm(neo4jHelper, relationshipsCache);
-                result = helper.graperankAllSteps(observer, params, designatedPubkeys);
+                result = helper.graperankAllSteps(observer, params, designatedPubkeys, compromisedPubkeys);
             } catch (Exception e) {
                 System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
                 e.printStackTrace();

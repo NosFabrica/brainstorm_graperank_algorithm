@@ -136,6 +136,22 @@ public class GrapeRankAlgorithm {
         return applied;
     }
 
+    /** Zero every compromised key the run holds, after the pins, so a designation pin is
+     * overridden too. Returns how many apply. */
+    static int applyCompromised(ScoreGraph graph, String observer, Collection<String> compromisedPubkeys) {
+        if (compromisedPubkeys == null) return 0;
+        int applied = 0;
+        for (String pubkey : new HashSet<>(compromisedPubkeys)) {
+            if (pubkey == null || pubkey.equals(observer)) continue;
+            Integer id = graph.idOf.get(pubkey);
+            if (id != null) {
+                graph.compromise(id);
+                applied++;
+            }
+        }
+        return applied;
+    }
+
     /** Pubkeys the Observer designated in their kind-10040 (the keys they trust to
      * publish assertions for them), minus the Observer. */
     static Set<String> designatedUsersOf(String observer, Collection<String> designatedPubkeys) {
@@ -203,6 +219,16 @@ public class GrapeRankAlgorithm {
      * have its own designations read. */
     public GrapeRankResult graperankAllSteps(
             String observer, GrapeRankParams params, Collection<String> designatedPubkeys) {
+        return graperankAllSteps(observer, params, designatedPubkeys, Set.of());
+    }
+
+    /** `compromisedPubkeys`: keys brainstorm_server marks compromised, as the request carries
+     * them. Each is held at Influence 0 (see {@link ScoreGraph#compromise}), so nothing it rates
+     * counts, even when the Observer designated it. The Observer itself is never zeroed: a run
+     * is its own perspective. */
+    public GrapeRankResult graperankAllSteps(
+            String observer, GrapeRankParams params, Collection<String> designatedPubkeys,
+            Collection<String> compromisedPubkeys) {
         long startTime = System.currentTimeMillis();
 
         long reachStartTime = System.currentTimeMillis();
@@ -264,12 +290,13 @@ public class GrapeRankAlgorithm {
             graph.pin(graph.idOf.get(pubkey));
         }
         int penalised = applyNip05Penalties(graph, stored, relevantUsers);
+        int compromised = applyCompromised(graph, observer, compromisedPubkeys);
         int n = graph.size();
         System.out.println("TIMING scorecard init took "
                 + (System.currentTimeMillis() - initStartTime) / 1000.0 + " seconds ("
                 + (relevantUsers.size() - reachable.size()) + " unreached, "
                 + (stored.size() - reachable.size()) + " of them stored, "
-                + penalised + " NIP-05 penalties)");
+                + penalised + " NIP-05 penalties, " + compromised + " compromised)");
 
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 

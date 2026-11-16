@@ -49,6 +49,14 @@ A run scores ~250k users over ~12M ratings, ~40 rounds. To keep that fast and sm
   come from the follow walk's Neo4j query (`nip05_status`, written by brainstorm_profile_resolver), plus
   one lookup for keys reached only by designation. Pinned users are never penalised.
 
+- **Compromised keys** — the calc request's `compromised_pubkeys` (brainstorm_server's
+  `compromised_pubkey` table, read when the run is queued) are held at Influence 0 from the first
+  sweep (`ScoreGraph.compromise`): factor 0, so nothing they rate — follows, mutes, reports,
+  designations — carries weight, and they count toward nobody's trusted followers, muters or
+  reporters. Unlike a NIP-05 penalty this overrides a designation pin: whoever holds the key now is
+  not who the Observer designated. The Observer itself is never zeroed. A request without the field
+  (an older server) zeroes nothing.
+
 The loop updates Influence in place, so the order users are visited in, and the order of each user's
 ratings (follows → mutes → reports), change the result. Keep both as they are, or
 `GrapeRankEquivalenceTest` fails.
