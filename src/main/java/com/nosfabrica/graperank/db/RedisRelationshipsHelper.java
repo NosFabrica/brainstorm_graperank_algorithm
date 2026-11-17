@@ -23,7 +23,8 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
     private enum ReverseSet {
         FOLLOWED_BY("followed_by:", "FOLLOWS"),
         MUTED_BY("muted_by:", "MUTES"),
-        REPORTED_BY("reported_by:", "REPORTS");
+        REPORTED_BY("reported_by:", "REPORTS"),
+        VOUCHED_BY("vouched_by:", "VOUCHES");
 
         final String keyPrefix;
         final String relationship;
@@ -78,15 +79,22 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
         return fetch(pubkeys, ReverseSet.REPORTED_BY).get(ReverseSet.REPORTED_BY);
     }
 
-    /** One pipelined round trip for all three reverse sets of the batch. */
+    @Override
+    public List<RelationshipInfo> getIncomingVouchesBulk(List<String> pubkeys) {
+        return fetch(pubkeys, ReverseSet.VOUCHED_BY).get(ReverseSet.VOUCHED_BY);
+    }
+
+    /** One pipelined round trip for all four reverse sets of the batch. */
     @Override
     public IncomingRelationships getIncomingBulk(List<String> pubkeys) {
         Map<ReverseSet, List<RelationshipInfo>> sets =
-                fetch(pubkeys, ReverseSet.FOLLOWED_BY, ReverseSet.MUTED_BY, ReverseSet.REPORTED_BY);
+                fetch(pubkeys, ReverseSet.FOLLOWED_BY, ReverseSet.MUTED_BY,
+                        ReverseSet.REPORTED_BY, ReverseSet.VOUCHED_BY);
         return new IncomingRelationships(
                 sets.get(ReverseSet.FOLLOWED_BY),
                 sets.get(ReverseSet.MUTED_BY),
-                sets.get(ReverseSet.REPORTED_BY));
+                sets.get(ReverseSet.REPORTED_BY),
+                sets.get(ReverseSet.VOUCHED_BY));
     }
 
     /** `SMEMBERS designates:<pubkey>` for every designator, in one pipeline. */

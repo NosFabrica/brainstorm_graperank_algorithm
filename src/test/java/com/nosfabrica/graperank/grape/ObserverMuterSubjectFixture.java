@@ -94,7 +94,9 @@ final class ObserverMuterSubjectFixture {
                 Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER,
                 verifiedFollowersInfluenceCutoff,
                 verifiedReportersInfluenceCutoff,
-                verifiedMutersInfluenceCutoff);
+                verifiedMutersInfluenceCutoff,
+                Constants.DEFAULT_RATING_FOR_VOUCH,
+                Constants.DEFAULT_CONFIDENCE_FOR_VOUCH);
 
         GrapeRankResult result =
                 new GrapeRankAlgorithm(new FakeGraphDB(), new FakeRelationshipsCache())

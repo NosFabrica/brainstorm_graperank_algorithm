@@ -32,7 +32,8 @@ class InfluenceDeadZoneTest {
                 Constants.DEFAULT_RATING_FOR_MUTE, Constants.DEFAULT_CONFIDENCE_FOR_MUTE,
                 Constants.DEFAULT_RATING_FOR_REPORT, Constants.DEFAULT_CONFIDENCE_FOR_REPORT,
                 Constants.DEFAULT_CONFIDENCE_FOR_FOLLOW_FROM_OBSERVER,
-                followersCutoff, 0.1, 0.01);
+                followersCutoff, 0.1, 0.01,
+                Constants.DEFAULT_RATING_FOR_VOUCH, Constants.DEFAULT_CONFIDENCE_FOR_VOUCH);
     }
 
     /** Stored scores as Neo4j would hold them after writing `cards`, with `shift` added to RATER and SUBJECT. */
