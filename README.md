@@ -12,6 +12,20 @@ Running
 docker run -d -e REDIS_HOST=host.docker.internal   -e REDIS_PORT=6379  -e NEO4J_URL=neo4j://host.docker.internal:7687 -e  NEO4J_USERNAME=neo4j -e NEO4J_PASSWORD=password  graperank 
 ```
 
+## Stored scores in the Scorecard database (`SCORES_IN_POSTGRES`)
+
+Off by default: the worker reads an Observer's stored scores from Neo4j properties
+(`Neo4jHelper`). With `SCORES_IN_POSTGRES=true` (and the five `SCORECARD_DB_*` settings, or the
+worker refuses to start) it uses `ScorecardGraphDB` instead:
+
+1. Neo4j walks the follows and returns each reached user's `user_id`, distance and NIP-05 status.
+2. `PostgresHelper` gives the pubkey of every id (batches of 50,000 ids) and the Observer's stored
+   Scorecards (`WHERE observer_id = ?`, one range, no join).
+
+Job and result messages are unchanged (pubkeys). Flip it together with the server's
+`SCORES_IN_POSTGRES`. `StoredScoresEquivalenceTest` (set `WORKER_IT=1`, see the class comment)
+holds both forms to the same answer against a real Neo4j and Postgres.
+
 ## Adding a new GrapeRank param
 
 Python (`brainstorm_server`) is the source of truth for preset values. Changes touch both repos — see the full checklist in [`brainstorm_server/README.md`](../brainstorm_server/README.md#adding--removing-a-graperank-preset-param).

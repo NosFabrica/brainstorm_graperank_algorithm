@@ -75,6 +75,50 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
         return result;
     }
 
+    // ----- graph-only reads, for stored scores kept in the Scorecard database (ScorecardGraphDB) -----
+    //
+    // `user_id` is cheap to read: it was added to each node after the score properties, so it
+    // sits at the head of the property chain. `pubkey` is the oldest property and costs a walk
+    // of the whole chain, as `nip05_status` does until the score properties are gone from the
+    // nodes. A node without an id (it should not exist) is returned by pubkey.
+
+    /** A reached user by User id, or by pubkey when the node has no id. */
+    public record Reached(Integer id, String pubkey, int hops, String nip05Status) {
+    }
+
+    /** The follow walk of `getReachableUsers` without the stored scores. */
+    public List<Reached> walkByUserId(String observer) {
+        String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
+                "WHERE other <> user " +
+                "WITH other, min(length(p)) AS hops " +
+                "RETURN other.user_id AS id, " +
+                "CASE WHEN other.user_id IS NULL THEN other.pubkey END AS pubkey, " +
+                "hops, other.nip05_status AS nip05Status";
+        try (Session session = driver.session()) {
+            return session.readTransaction(tx -> tx.run(query, Values.parameters("pubkey", observer))
+                    .list(record -> new Reached(
+                            record.get("id").isNull() ? null : record.get("id").asInt(),
+                            record.get("pubkey").isNull() ? null : record.get("pubkey").asString(),
+                            record.get("hops").asInt(),
+                            record.get("nip05Status").isNull() ? null : record.get("nip05Status").asString())));
+        }
+    }
+
+    /** The NIP-05 status of each of [pubkeys] that has one. */
+    public Map<String, String> nip05StatusesOf(Collection<String> pubkeys) {
+        String query = "UNWIND $pubkeys AS pk MATCH (other:NostrUser {pubkey: pk}) " +
+                "WHERE other.nip05_status IS NOT NULL " +
+                "RETURN pk AS pubkey, other.nip05_status AS nip05Status";
+        Map<String, String> statuses = new HashMap<>();
+        try (Session session = driver.session()) {
+            for (Record record : session.readTransaction(tx -> tx.run(query,
+                    Values.parameters("pubkeys", List.copyOf(pubkeys))).list())) {
+                statuses.put(record.get("pubkey").asString(), record.get("nip05Status").asString());
+            }
+        }
+        return statuses;
+    }
+
     private ReachableUser getObserver(String observer) {
         String query = "MATCH (other:NostrUser {pubkey: $pubkey}) RETURN " + STORED_PROPS + " LIMIT 1";
         try (Session session = driver.session()) {

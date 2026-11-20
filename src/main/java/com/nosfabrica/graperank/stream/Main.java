@@ -3,8 +3,11 @@ package com.nosfabrica.graperank.stream;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nosfabrica.graperank.db.IGraphDB;
 import com.nosfabrica.graperank.db.Neo4jHelper;
+import com.nosfabrica.graperank.db.PostgresHelper;
 import com.nosfabrica.graperank.db.RedisRelationshipsHelper;
+import com.nosfabrica.graperank.db.ScorecardGraphDB;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import java.util.ArrayList;
@@ -53,6 +56,10 @@ public class Main {
 
     // One driver per process: a driver per message leaked its pool and native buffers.
     private static final Neo4jHelper neo4jHelper = new Neo4jHelper(NEO4J_URL, NEO4J_USERNAME, NEO4J_PASSWORD);
+    // With SCORES_IN_POSTGRES the stored scores come from the Scorecard database, not Neo4j properties.
+    private static final PostgresHelper postgresHelper = PostgresHelper.fromEnv(System.getenv());
+    private static final IGraphDB graphDb =
+            postgresHelper == null ? neo4jHelper : new ScorecardGraphDB(neo4jHelper, postgresHelper);
     private static final RedisRelationshipsHelper relationshipsCache = new RedisRelationshipsHelper(REDIS_HOST, REDIS_PORT);
 
     public static void main(String[] args) {
@@ -218,7 +225,7 @@ public class Main {
 
             GrapeRankResult result;
             try {
-                GrapeRankAlgorithm helper = new GrapeRankAlgorithm(neo4jHelper, relationshipsCache);
+                GrapeRankAlgorithm helper = new GrapeRankAlgorithm(graphDb, relationshipsCache);
                 result = helper.graperankAllSteps(observer, params, designatedPubkeys, compromisedPubkeys);
             } catch (Exception e) {
                 System.err.println("Algorithm failed for privateId " + privateId + ", marking FAILED: " + e.getMessage());
