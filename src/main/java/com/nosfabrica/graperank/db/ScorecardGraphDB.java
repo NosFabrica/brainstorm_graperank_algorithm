@@ -10,8 +10,9 @@ import java.util.Map;
 
 /**
  * An Observer's reach with the stored scores kept in the Scorecard database: Neo4j answers who
- * (by User id), how far and with which NIP-05 status; Postgres gives pubkeys and stored scores.
- * Same answers as [Neo4jHelper] reading score properties.
+ * (by User id) and how far; Postgres gives pubkeys and stored scores. Same answers as
+ * [Neo4jHelper] reading score properties, except that a reached user's NIP-05 status reads as
+ * none unless it is penalised (only a penalised one changes a score).
  */
 public class ScorecardGraphDB implements IGraphDB {
 
@@ -32,6 +33,13 @@ public class ScorecardGraphDB implements IGraphDB {
         List<Neo4jHelper.Reached> reached = graph.walkByUserId(observer);
         if (reached.isEmpty()) return result;
 
+        Map<Integer, String> penalisedById = new HashMap<>();
+        Map<String, String> penalisedByPubkey = new HashMap<>();
+        for (Neo4jHelper.Penalised penalised : graph.penalisedNip05()) {
+            if (penalised.id() == null) penalisedByPubkey.put(penalised.pubkey(), penalised.status());
+            else penalisedById.put(penalised.id(), penalised.status());
+        }
+
         List<Integer> ids = new ArrayList<>(reached.size());
         for (Neo4jHelper.Reached user : reached) if (user.id() != null) ids.add(user.id());
         PostgresHelper.Stored stored = postgres.load(observer, ids);
@@ -41,10 +49,10 @@ public class ScorecardGraphDB implements IGraphDB {
                 graph.nip05StatusesOf(List.of(observer)).get(observer)));
         for (Neo4jHelper.Reached user : reached) {
             if (user.id() == null) {
-                result.put(user.pubkey(), reachableUser(user.hops(), null, user.nip05Status()));
+                result.put(user.pubkey(), reachableUser(user.hops(), null, penalisedByPubkey.get(user.pubkey())));
             } else {
                 result.put(stored.pubkeys().get(user.id()), reachableUser(
-                        user.hops(), stored.scores().get(user.id()), user.nip05Status()));
+                        user.hops(), stored.scores().get(user.id()), penalisedById.get(user.id())));
             }
         }
         return result;

@@ -116,6 +116,7 @@ class StoredScoresEquivalenceTest {
                     session.run("CREATE (:NostrUser {pubkey: $pubkey, user_id: $id})",
                             Values.parameters("pubkey", entry.getKey(), "id", entry.getValue())).consume();
                 }
+                session.run("CREATE INDEX nostr_user_nip05_status IF NOT EXISTS FOR (u:NostrUser) ON (u.nip05_status)").consume();
                 session.run("CREATE (:NostrUser {pubkey: $pubkey})", Values.parameters("pubkey", NO_ID)).consume();
                 for (Object[] score : scores) {
                     Map<String, Object> props = new HashMap<>();
@@ -145,15 +146,25 @@ class StoredScoresEquivalenceTest {
         driver.close();
     }
 
+    /** A reached user's status that is not penalised reads as none from the Scorecard path. */
+    private static Map<String, ReachableUser> penalisedOnly(Map<String, ReachableUser> users) {
+        Map<String, ReachableUser> out = new HashMap<>();
+        users.forEach((pubkey, user) -> out.put(pubkey, new ReachableUser(
+                user.hops(), user.storedInfluence(), user.storedHops(), user.storedTrustedFollowers(),
+                user.nip05Status() != null && Constants.PENALISED_NIP05_STATUSES.contains(user.nip05Status())
+                        ? user.nip05Status() : null)));
+        return out;
+    }
+
     @Test
     void theFollowWalkAgrees() {
         Map<String, ReachableUser> fromProperties = properties.getReachableUsers(OBSERVER);
         Map<String, ReachableUser> fromScorecards = scorecards.getReachableUsers(OBSERVER);
-        assertEquals(fromProperties, fromScorecards);
+        assertEquals(penalisedOnly(fromProperties), fromScorecards);
 
         assertEquals(java.util.Set.of(OBSERVER, A, B, C, NO_ID), fromScorecards.keySet());
         assertEquals(new ReachableUser(1, 0.7512345678901234, 1L, 12L, "NOT_LISTED"), fromScorecards.get(A));
-        assertEquals(new ReachableUser(1, 0.05, 1L, 0L, "VERIFIED"), fromScorecards.get(B));
+        assertEquals(new ReachableUser(1, 0.05, 1L, 0L, null), fromScorecards.get(B));
         assertEquals(new ReachableUser(2, 0.3, 2L, null, null), fromScorecards.get(C));
         assertEquals(new ReachableUser(2, null, null, null, "NOT_LISTED"), fromScorecards.get(NO_ID));
         assertEquals(new ReachableUser(0, 1.0, 0L, 3L, null), fromScorecards.get(OBSERVER));
@@ -163,7 +174,7 @@ class StoredScoresEquivalenceTest {
     void anObserverWithNoRowsIsAFirstTimeObserver() {
         Map<String, ReachableUser> fromProperties = properties.getReachableUsers(NEW_OBSERVER);
         Map<String, ReachableUser> fromScorecards = scorecards.getReachableUsers(NEW_OBSERVER);
-        assertEquals(fromProperties, fromScorecards);
+        assertEquals(penalisedOnly(fromProperties), fromScorecards);
         assertNull(fromScorecards.get(A).storedInfluence());
         assertEquals(1, fromScorecards.get(A).hops());
     }

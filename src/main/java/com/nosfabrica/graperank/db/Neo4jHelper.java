@@ -79,28 +79,54 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
     //
     // `user_id` is cheap to read: it was added to each node after the score properties, so it
     // sits at the head of the property chain. `pubkey` is the oldest property and costs a walk
-    // of the whole chain, as `nip05_status` does until the score properties are gone from the
-    // nodes. A node without an id (it should not exist) is returned by pubkey.
+    // of the whole chain, and so does `nip05_status` while the score properties are still on
+    // the nodes: the walk reads neither. A node without an id (it should not exist) is
+    // returned by pubkey.
+
+    private static final String ID_OR_PUBKEY =
+            "other.user_id AS id, CASE WHEN other.user_id IS NULL THEN other.pubkey END AS pubkey";
+
+    private static final List<String> PENALISED =
+            List.copyOf(com.nosfabrica.graperank.grape.Constants.PENALISED_NIP05_STATUSES);
 
     /** A reached user by User id, or by pubkey when the node has no id. */
-    public record Reached(Integer id, String pubkey, int hops, String nip05Status) {
+    public record Reached(Integer id, String pubkey, int hops) {
     }
 
-    /** The follow walk of `getReachableUsers` without the stored scores. */
+    /** A user with a penalised NIP-05 status, by User id or by pubkey when the node has no id. */
+    public record Penalised(Integer id, String pubkey, String status) {
+    }
+
+    /** The follow walk of `getReachableUsers`: ids and distances only. */
     public List<Reached> walkByUserId(String observer) {
         String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
                 "WHERE other <> user " +
                 "WITH other, min(length(p)) AS hops " +
-                "RETURN other.user_id AS id, " +
-                "CASE WHEN other.user_id IS NULL THEN other.pubkey END AS pubkey, " +
-                "hops, other.nip05_status AS nip05Status";
+                "RETURN " + ID_OR_PUBKEY + ", hops";
         try (Session session = driver.session()) {
             return session.readTransaction(tx -> tx.run(query, Values.parameters("pubkey", observer))
                     .list(record -> new Reached(
                             record.get("id").isNull() ? null : record.get("id").asInt(),
                             record.get("pubkey").isNull() ? null : record.get("pubkey").asString(),
-                            record.get("hops").asInt(),
-                            record.get("nip05Status").isNull() ? null : record.get("nip05Status").asString())));
+                            record.get("hops").asInt())));
+        }
+    }
+
+    /**
+     * Everyone with a penalised NIP-05 status, through the `nostr_user_nip05_status` index the
+     * server creates. Only a penalised status changes a score and few users have one, so this
+     * stands in for one property read per reached user. Temporary: once the score properties
+     * are off the nodes the walk can read the status itself and the index can go.
+     */
+    public List<Penalised> penalisedNip05() {
+        String query = "MATCH (other:NostrUser) WHERE other.nip05_status IN $penalised " +
+                "RETURN " + ID_OR_PUBKEY + ", other.nip05_status AS nip05Status";
+        try (Session session = driver.session()) {
+            return session.readTransaction(tx -> tx.run(query, Values.parameters("penalised", PENALISED))
+                    .list(record -> new Penalised(
+                            record.get("id").isNull() ? null : record.get("id").asInt(),
+                            record.get("pubkey").isNull() ? null : record.get("pubkey").asString(),
+                            record.get("nip05Status").asString())));
         }
     }
 

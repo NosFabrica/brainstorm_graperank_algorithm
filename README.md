@@ -18,9 +18,13 @@ Off by default: the worker reads an Observer's stored scores from Neo4j properti
 (`Neo4jHelper`). With `SCORES_IN_POSTGRES=true` (and the five `SCORECARD_DB_*` settings, or the
 worker refuses to start) it uses `ScorecardGraphDB` instead:
 
-1. Neo4j walks the follows and returns each reached user's `user_id`, distance and NIP-05 status.
+1. Neo4j walks the follows and returns each reached user's `user_id` and distance, nothing else.
 2. `PostgresHelper` gives the pubkey of every id (batches of 50,000 ids) and the Observer's stored
    Scorecards (`WHERE observer_id = ?`, one range, no join).
+
+3. NIP-05 statuses stay in Neo4j: only the penalised ones are read, through the
+   `nostr_user_nip05_status` index the server creates. Temporary: once the score properties are
+   off the nodes the walk can read the status itself and the index can be dropped.
 
 Job and result messages are unchanged (pubkeys). Flip it together with the server's
 `SCORES_IN_POSTGRES`. `StoredScoresEquivalenceTest` (set `WORKER_IT=1`, see the class comment)
