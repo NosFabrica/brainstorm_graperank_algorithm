@@ -112,6 +112,21 @@ public class RedisRelationshipsHelper implements IRelationshipsCache, AutoClosea
         return designationsOf(designators, designated, signers);
     }
 
+    /** `SMEMBERS` of each key, in one pipeline on a pooled connection, in key order. */
+    List<Set<String>> members(List<String> keys) {
+        List<Response<Set<String>>> responses = new ArrayList<>(keys.size());
+        if (!keys.isEmpty()) {
+            try (Jedis jedis = pool.getResource()) {
+                Pipeline pipeline = jedis.pipelined();
+                for (String key : keys) responses.add(pipeline.smembers(key));
+                pipeline.sync();
+            }
+        }
+        List<Set<String>> out = new ArrayList<>(keys.size());
+        for (Response<Set<String>> response : responses) out.add(response.get());
+        return out;
+    }
+
     /** Each designator's kind-10040 keys and zap signer together; a designator with neither is absent. */
     static Map<String, Set<String>> designationsOf(
             List<String> designators, List<Set<String>> designated, List<Set<String>> zapSigners) {

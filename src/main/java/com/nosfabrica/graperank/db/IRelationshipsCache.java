@@ -14,6 +14,11 @@ public interface IRelationshipsCache {
 
     List<RelationshipInfo> getIncomingReportsBulk(List<String> pubkeys);
 
+    /** Told, before the gather, every user the run scores. A cache that drops raters the run
+     * does not score needs it; the others ignore it. */
+    default void prepare(List<String> relevantUsers) {
+    }
+
     /** How many batches the gather may fetch at once. */
     default int maxConcurrentFetches() {
         return 4;

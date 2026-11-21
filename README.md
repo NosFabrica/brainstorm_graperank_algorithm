@@ -26,9 +26,22 @@ worker refuses to start) it uses `ScorecardGraphDB` instead:
    `nostr_user_nip05_status` index the server creates. Temporary: once the score properties are
    off the nodes the walk can read the status itself and the index can be dropped.
 
-Job and result messages are unchanged (pubkeys). Flip it together with the server's
-`SCORES_IN_POSTGRES`. `StoredScoresEquivalenceTest` (set `WORKER_IT=1`, see the class comment)
+The job message is unchanged. The result message then names users by User id
+(`IdGrapeRankResult`): `observer` (the pubkey, once), `scorecardsById` keyed by the Observee's id
+with no `observer`, `observee` or `context` on a card, and `changedScoreIds`,
+`droppedBelowCutoffIds`, `neo4jWriteIds`, `neo4jClearIds`. The server turns it back into the
+pubkey form as it reads it. A scored user without an id fails the run. Flip it together with the
+server's `SCORES_IN_POSTGRES`, with no run in the pipeline. `StoredScoresEquivalenceTest` (set `WORKER_IT=1`, see the class comment)
 holds both forms to the same answer against a real Neo4j and Postgres.
+
+The same switch changes how the Redis relationship sets name users: `followed_by:<id>` holding
+ids (and likewise `muted_by`, `reported_by`, `designates`, `zaps_via`) instead of pubkeys. The
+server builds them at its start. `IdRelationshipsCache` reads them through the run's `RunIds`
+(the ids the walk met, more looked up in Postgres on request) and answers in pubkeys; a rater the
+run does not score is dropped there. Members come back in another order than pubkeys did, so a
+stored Influence can differ from the pubkey-named run in its last float digit.
+`IdRelationshipsCacheTest` (`WORKER_IT=1`, plus `WORKER_IT_REDIS_HOST` / `_PORT`) holds the two
+namings to the same ratings.
 
 ## Adding a new GrapeRank param
 

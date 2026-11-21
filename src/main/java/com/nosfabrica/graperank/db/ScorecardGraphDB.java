@@ -18,10 +18,17 @@ public class ScorecardGraphDB implements IGraphDB {
 
     private final Neo4jHelper graph;
     private final PostgresHelper postgres;
+    // The run's ids, shared with the reader of the Redis sets; null when nothing reads them.
+    private final RunIds runIds;
 
     public ScorecardGraphDB(Neo4jHelper graph, PostgresHelper postgres) {
+        this(graph, postgres, null);
+    }
+
+    public ScorecardGraphDB(Neo4jHelper graph, PostgresHelper postgres, RunIds runIds) {
         this.graph = graph;
         this.postgres = postgres;
+        this.runIds = runIds;
     }
 
     @Override
@@ -43,6 +50,7 @@ public class ScorecardGraphDB implements IGraphDB {
         List<Integer> ids = new ArrayList<>(reached.size());
         for (Neo4jHelper.Reached user : reached) if (user.id() != null) ids.add(user.id());
         PostgresHelper.Stored stored = postgres.load(observer, ids);
+        if (runIds != null) runIds.learn(stored.pubkeys());
 
         result.put(observer, reachableUser(0,
                 postgres.scoresFor(observer, List.of(observer)).get(observer),

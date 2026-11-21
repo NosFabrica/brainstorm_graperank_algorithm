@@ -301,6 +301,7 @@ public class GrapeRankAlgorithm {
         ScoreGraph.EdgeList ratings = new ScoreGraph.EdgeList();
 
         long gatherStartTime = System.currentTimeMillis();
+        relationshipsCache.prepare(relevantUsers);
         long fetchMillis = 0;
         long waitMillis = 0;
         long edgeCount = 0;

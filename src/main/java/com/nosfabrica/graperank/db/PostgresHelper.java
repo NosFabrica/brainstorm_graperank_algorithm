@@ -149,6 +149,40 @@ public class PostgresHelper {
         return scores;
     }
 
+    /** The pubkey of each of [userIds] the table knows. */
+    public Map<Integer, String> pubkeysOf(Collection<Integer> userIds) {
+        if (userIds.isEmpty()) return new HashMap<>();
+        try (Connection connection = connect()) {
+            return pubkeysOf(connection, userIds);
+        } catch (SQLException e) {
+            throw new IllegalStateException("Scorecard database read failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** The User id of each of [pubkeys] that has one. */
+    public Map<String, Integer> idsOf(Collection<String> pubkeys) {
+        Map<String, Integer> ids = new HashMap<>(pubkeys.size() * 2);
+        if (pubkeys.isEmpty()) return ids;
+        List<String> wanted = new ArrayList<>(pubkeys);
+        try (Connection connection = connect();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT pubkey, id FROM nostr_user WHERE pubkey = ANY(?)")) {
+            statement.setFetchSize(FETCH_SIZE);
+            for (int from = 0; from < wanted.size(); from += ID_BATCH) {
+                List<String> batch = wanted.subList(from, Math.min(from + ID_BATCH, wanted.size()));
+                Array array = connection.createArrayOf("text", batch.toArray());
+                statement.setArray(1, array);
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) ids.put(rows.getString(1), rows.getInt(2));
+                }
+                array.free();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Scorecard database read failed: " + e.getMessage(), e);
+        }
+        return ids;
+    }
+
     private static StoredScore storedScore(ResultSet rows, int first) throws SQLException {
         Double influence = rows.getObject(first, Double.class);
         Number hops = (Number) rows.getObject(first + 1);
