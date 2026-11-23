@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -54,5 +56,14 @@ class PostgresHelperSettingsTest {
         Map<String, String> env = complete();
         env.put("SCORES_IN_POSTGRES", "yes please");
         assertThrows(IllegalStateException.class, () -> PostgresHelper.fromEnv(env));
+    }
+
+    @Test
+    void connectionsCarryTimeouts() {
+        Properties properties = PostgresHelper.connectionProperties("reader", "secret");
+        assertEquals("reader", properties.getProperty("user"));
+        assertEquals("secret", properties.getProperty("password"));
+        assertEquals("-c statement_timeout=120000", properties.getProperty("options"));
+        assertEquals("300", properties.getProperty("socketTimeout"));
     }
 }

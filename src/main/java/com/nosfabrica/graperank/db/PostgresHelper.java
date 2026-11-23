@@ -11,6 +11,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * Read-only access to the Scorecard database: User ids (`nostr_user`) and stored Scorecards
@@ -22,15 +23,25 @@ public class PostgresHelper {
     /** Ids per `= ANY(?)`: one array parameter, kept to a few hundred kilobytes. */
     static final int ID_BATCH = 50_000;
     private static final int FETCH_SIZE = 10_000;
+    // Server-side cap per statement; the socket timeout catches a dead server or network.
+    static final int STATEMENT_TIMEOUT_MS = 120_000;
+    static final int SOCKET_TIMEOUT_S = 300;
 
     private final String url;
-    private final String user;
-    private final String password;
+    private final Properties properties;
 
     public PostgresHelper(String host, String port, String database, String user, String password) {
         this.url = "jdbc:postgresql://" + host + ":" + port + "/" + database;
-        this.user = user;
-        this.password = password;
+        this.properties = connectionProperties(user, password);
+    }
+
+    static Properties connectionProperties(String user, String password) {
+        Properties properties = new Properties();
+        properties.setProperty("user", user);
+        properties.setProperty("password", password);
+        properties.setProperty("options", "-c statement_timeout=" + STATEMENT_TIMEOUT_MS);
+        properties.setProperty("socketTimeout", String.valueOf(SOCKET_TIMEOUT_S));
+        return properties;
     }
 
     /** From the environment when `SCORES_IN_POSTGRES` is on, else null. A switch that is on
@@ -53,7 +64,7 @@ public class PostgresHelper {
     }
 
     private Connection connect() throws SQLException {
-        Connection connection = DriverManager.getConnection(url, user, password);
+        Connection connection = DriverManager.getConnection(url, properties);
         connection.setReadOnly(true);
         // Off, so a fetch size streams rows instead of buffering a whole Observer.
         connection.setAutoCommit(false);
