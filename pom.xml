@@ -29,6 +29,13 @@
             <version>7.2.0</version>
         </dependency>
 
+        <!-- Scorecard database (stored scores, user ids) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.7</version>
+        </dependency>
+
         <!-- Jackson for JSON -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

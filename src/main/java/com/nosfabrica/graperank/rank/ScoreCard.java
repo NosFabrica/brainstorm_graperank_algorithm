@@ -1,9 +1,15 @@
 package com.nosfabrica.graperank.rank;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class ScoreCard {
+    // Left out of the message when null: a result that names users by User id carries the
+    // Observer once and the Observee as the card's key (IdGrapeRankResult).
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String observer;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String observee;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String context = "not a bot";
     // Whole numbers on the wire (3, not 3.0): consumers bucket and tag by them as ints.
     private int hops;

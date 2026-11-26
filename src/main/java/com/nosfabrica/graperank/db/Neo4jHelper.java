@@ -75,6 +75,76 @@ public class Neo4jHelper implements IGraphDB, AutoCloseable {
         return result;
     }
 
+    // ----- graph-only reads, for stored scores kept in the Scorecard database (ScorecardGraphDB) -----
+    //
+    // `user_id` is cheap to read: it was added to each node after the score properties, so it
+    // sits at the head of the property chain. `pubkey` is the oldest property and costs a walk
+    // of the whole chain, and so does `nip05_status` while the score properties are still on
+    // the nodes: the walk reads neither. A node without an id (it should not exist) is
+    // returned by pubkey.
+
+    private static final String ID_OR_PUBKEY =
+            "other.user_id AS id, CASE WHEN other.user_id IS NULL THEN other.pubkey END AS pubkey";
+
+    private static final List<String> PENALISED =
+            List.copyOf(com.nosfabrica.graperank.grape.Constants.PENALISED_NIP05_STATUSES);
+
+    /** A reached user by User id, or by pubkey when the node has no id. */
+    public record Reached(Integer id, String pubkey, int hops) {
+    }
+
+    /** A user with a penalised NIP-05 status, by User id or by pubkey when the node has no id. */
+    public record Penalised(Integer id, String pubkey, String status) {
+    }
+
+    /** The follow walk of `getReachableUsers`: ids and distances only. */
+    public List<Reached> walkByUserId(String observer) {
+        String query = "MATCH p = (user:NostrUser {pubkey: $pubkey})-[:FOLLOWS*1..]->(other:NostrUser) " +
+                "WHERE other <> user " +
+                "WITH other, min(length(p)) AS hops " +
+                "RETURN " + ID_OR_PUBKEY + ", hops";
+        try (Session session = driver.session()) {
+            return session.readTransaction(tx -> tx.run(query, Values.parameters("pubkey", observer))
+                    .list(record -> new Reached(
+                            record.get("id").isNull() ? null : record.get("id").asInt(),
+                            record.get("pubkey").isNull() ? null : record.get("pubkey").asString(),
+                            record.get("hops").asInt())));
+        }
+    }
+
+    /**
+     * Everyone with a penalised NIP-05 status, through the `nostr_user_nip05_status` index the
+     * server creates. Only a penalised status changes a score and few users have one, so this
+     * stands in for one property read per reached user. Temporary: once the score properties
+     * are off the nodes the walk can read the status itself and the index can go.
+     */
+    public List<Penalised> penalisedNip05() {
+        String query = "MATCH (other:NostrUser) WHERE other.nip05_status IN $penalised " +
+                "RETURN " + ID_OR_PUBKEY + ", other.nip05_status AS nip05Status";
+        try (Session session = driver.session()) {
+            return session.readTransaction(tx -> tx.run(query, Values.parameters("penalised", PENALISED))
+                    .list(record -> new Penalised(
+                            record.get("id").isNull() ? null : record.get("id").asInt(),
+                            record.get("pubkey").isNull() ? null : record.get("pubkey").asString(),
+                            record.get("nip05Status").asString())));
+        }
+    }
+
+    /** The NIP-05 status of each of [pubkeys] that has one. */
+    public Map<String, String> nip05StatusesOf(Collection<String> pubkeys) {
+        String query = "UNWIND $pubkeys AS pk MATCH (other:NostrUser {pubkey: pk}) " +
+                "WHERE other.nip05_status IS NOT NULL " +
+                "RETURN pk AS pubkey, other.nip05_status AS nip05Status";
+        Map<String, String> statuses = new HashMap<>();
+        try (Session session = driver.session()) {
+            for (Record record : session.readTransaction(tx -> tx.run(query,
+                    Values.parameters("pubkeys", List.copyOf(pubkeys))).list())) {
+                statuses.put(record.get("pubkey").asString(), record.get("nip05Status").asString());
+            }
+        }
+        return statuses;
+    }
+
     private ReachableUser getObserver(String observer) {
         String query = "MATCH (other:NostrUser {pubkey: $pubkey}) RETURN " + STORED_PROPS + " LIMIT 1";
         try (Session session = driver.session()) {

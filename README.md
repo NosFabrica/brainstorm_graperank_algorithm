@@ -12,6 +12,37 @@ Running
 docker run -d -e REDIS_HOST=host.docker.internal   -e REDIS_PORT=6379  -e NEO4J_URL=neo4j://host.docker.internal:7687 -e  NEO4J_USERNAME=neo4j -e NEO4J_PASSWORD=password  graperank 
 ```
 
+## Stored scores in the Scorecard database (`SCORES_IN_POSTGRES`)
+
+Off by default: the worker reads an Observer's stored scores from Neo4j properties
+(`Neo4jHelper`). With `SCORES_IN_POSTGRES=true` (and the five `SCORECARD_DB_*` settings, or the
+worker refuses to start) it uses `ScorecardGraphDB` instead:
+
+1. Neo4j walks the follows and returns each reached user's `user_id` and distance, nothing else.
+2. `PostgresHelper` gives the pubkey of every id (batches of 50,000 ids) and the Observer's stored
+   Scorecards (`WHERE observer_id = ?`, one range, no join).
+
+3. NIP-05 statuses stay in Neo4j: only the penalised ones are read, through the
+   `nostr_user_nip05_status` index the server creates. Temporary: once the score properties are
+   off the nodes the walk can read the status itself and the index can be dropped.
+
+The job message is unchanged. The result message then names users by User id
+(`IdGrapeRankResult`): `observer` (the pubkey, once), `scorecardsById` keyed by the Observee's id
+with no `observer`, `observee` or `context` on a card, and `changedScoreIds`,
+`droppedBelowCutoffIds`, `neo4jWriteIds`, `neo4jClearIds`. The server turns it back into the
+pubkey form as it reads it. A scored user without an id fails the run. Flip it together with the
+server's `SCORES_IN_POSTGRES`, with no run in the pipeline. `StoredScoresEquivalenceTest` (set `WORKER_IT=1`, see the class comment)
+holds both forms to the same answer against a real Neo4j and Postgres.
+
+The same switch changes how the Redis relationship sets name users: `followed_by:<id>` holding
+ids (and likewise `muted_by`, `reported_by`, `designates`, `zaps_via`) instead of pubkeys. The
+server builds them at its start. `IdRelationshipsCache` reads them through the run's `RunIds`
+(the ids the walk met, more looked up in Postgres on request) and answers in pubkeys; a rater the
+run does not score is dropped there. Members come back in another order than pubkeys did, so a
+stored Influence can differ from the pubkey-named run in its last float digit.
+`IdRelationshipsCacheTest` (`WORKER_IT=1`, plus `WORKER_IT_REDIS_HOST` / `_PORT`) holds the two
+namings to the same ratings.
+
 ## Adding a new GrapeRank param
 
 Python (`brainstorm_server`) is the source of truth for preset values. Changes touch both repos — see the full checklist in [`brainstorm_server/README.md`](../brainstorm_server/README.md#adding--removing-a-graperank-preset-param).
